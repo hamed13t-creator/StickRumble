@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Ring Rumble</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#171018">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ring Rumble">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ================= Select Screen ================= -->
+<div id="selectScreen">
+  <div class="selectCard">
+    <h1>Ring Rumble</h1>
+    <div class="pickRow">
+      <div class="pickLabel">YOUR FIGHTER</div>
+      <div class="charGrid" id="charGrid"></div>
+    </div>
+    <div class="pickRow">
+      <div class="pickLabel">CPU DIFFICULTY</div>
+      <div class="diffRow" id="diffRow">
+        <button class="diffBtn" data-diff="easy">Easy</button>
+        <button class="diffBtn active" data-diff="medium">Medium</button>
+        <button class="diffBtn" data-diff="hard">Hard</button>
+      </div>
+    </div>
+    <button id="fightBtn">FIGHT!</button>
+    <div class="hint">Left/Right to run · double-tap a direction to dash · JUMP, then JUMP again mid-air for a front flip · hold BLOCK to guard, BLOCK+KICK for a low sweep, BLOCK+JUMP to backflip away · Punch, Punch, Kick chains into a Rush combo</div>
+  </div>
+</div>
+
+<!-- ================= Game Screen ================= -->
+<div id="gameScreen">
+  <h1 class="title">Ring Rumble</h1>
+  <div id="hud">
+    <div class="side you">
+      <div class="name">YOU</div>
+      <div class="healthWrap"><div class="healthFill youFill" id="youHealth"></div></div>
+    </div>
+    <div id="timer">60</div>
+    <div class="side cpu">
+      <div class="name">CPU <span class="diffTag" id="diffTag">MEDIUM</span></div>
+      <div class="healthWrap"><div class="healthFill cpuFill" id="cpuHealth"></div></div>
+    </div>
+  </div>
+
+  <div id="arenaOuter">
+    <div id="stage">
+      <div id="bgLayers"></div>
+      <div id="world"></div>
+      <div id="koFlash"></div>
+      <div id="banner"></div>
+      <button id="pauseBtn" aria-label="Pause">❚❚</button>
+
+      <div id="overlay" class="screenOverlay">
+        <h2 id="resultText">Winner!</h2>
+        <div class="overlayBtns">
+          <button id="restartBtn">Rematch</button>
+          <button id="changeBtn">Change Fighter</button>
+        </div>
+      </div>
+
+      <div id="pauseOverlay" class="screenOverlay">
+        <h2>Paused</h2>
+        <div class="overlayBtns">
+          <button id="resumeBtn">Resume</button>
+          <button id="pauseRestartBtn">Restart Match</button>
+          <button id="pauseExitBtn">Exit to Select</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="dpad">
+      <button class="dpadBtn" data-ctrl="left">◀</button>
+      <button class="dpadBtn" data-ctrl="right">▶</button>
+    </div>
+    <div class="actionCluster">
+      <button class="btnJump" data-key="jump">⤒ JUMP</button>
+      <button class="btnPunch" data-key="punch">PUNCH</button>
+      <button class="btnBlock" data-key="block">⛊ BLOCK</button>
+      <button class="btnKick" data-key="kick">KICK</button>
+    </div>
+  </div>
+  <div class="footHint">Keyboard: A/D run · W/Space jump (again mid-air = flip) · J punch · K kick · L or S hold = block (block+K = sweep, block+W = backflip)</div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

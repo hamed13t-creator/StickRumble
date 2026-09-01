@@ -1,0 +1,298 @@
+:root{
+  --blue:#2e6bff; --blue-dark:#123a9c;
+  --red:#ff3b3b; --red-dark:#9c1212;
+  --gold:#ffcf4d;
+  --blood:#8c1414;
+}
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body{
+  margin:0; height:100%; overflow:hidden;
+  background:radial-gradient(circle at 50% 20%, #2a1f2c 0%, #14101a 60%, #0a0810 100%);
+  font-family:'Trebuchet MS','Segoe UI',sans-serif; color:#f4ecff;
+  touch-action:none; user-select:none; -webkit-user-select:none;
+}
+button{ font-family:inherit; }
+
+/* ================= Select Screen ================= */
+#selectScreen{ height:100%; display:flex; align-items:center; justify-content:center; padding:16px; overflow-y:auto; }
+.selectCard{
+  width:min(94vw,480px); background:rgba(30,20,34,.9); border:1px solid #4a3a50; border-radius:18px;
+  padding:18px 18px 22px; box-shadow:0 10px 40px rgba(0,0,0,.5); max-height:96vh; overflow-y:auto;
+}
+.selectCard h1{
+  text-align:center; margin:0 0 14px; letter-spacing:3px; font-size:clamp(20px,6vw,28px); text-transform:uppercase;
+  background:linear-gradient(90deg,var(--blue) 0%,var(--gold) 50%,var(--red) 100%);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.pickRow{ margin-bottom:16px; }
+.pickLabel{ font-size:12px; font-weight:bold; letter-spacing:1.5px; margin-bottom:6px; opacity:.85; }
+.charGrid{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+.charBtn{
+  aspect-ratio:1; border-radius:10px; border:2px solid #4a3a50; background:#211823;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; padding:2px; gap:1px;
+}
+.charBtn svg{ width:60%; height:70%; }
+.charBtn .cname{ font-size:8px; opacity:.75; letter-spacing:.5px; }
+.charBtn.sel{ border-color:var(--gold); box-shadow:0 0 10px rgba(255,207,77,.7); }
+.diffRow{ display:flex; gap:8px; }
+.diffBtn{
+  flex:1; padding:10px 6px; border-radius:10px; border:1px solid #4a3a50; background:#2a1f2c;
+  color:#cfc4d8; font-weight:bold; font-size:13px; cursor:pointer;
+}
+.diffBtn.active{ background:linear-gradient(90deg,var(--blue),var(--red)); color:#fff; border-color:transparent; }
+#fightBtn{
+  width:100%; margin-top:6px; padding:14px; border:none; border-radius:30px;
+  background:linear-gradient(90deg,var(--blue),var(--red)); color:#fff; font-weight:900;
+  font-size:17px; letter-spacing:2px; cursor:pointer; box-shadow:0 6px 18px rgba(0,0,0,.4);
+}
+.hint{ text-align:center; font-size:11px; opacity:.6; margin-top:10px; line-height:1.4; }
+
+/* ================= Game Screen ================= */
+#gameScreen{ height:100%; display:none; flex-direction:column; padding:0 6px; }
+h1.title{
+  text-align:center; margin:2px 0 4px; letter-spacing:3px; font-size:clamp(13px,3.4vw,18px); text-transform:uppercase;
+  background:linear-gradient(90deg,var(--blue) 0%,var(--gold) 50%,var(--red) 100%);
+  -webkit-background-clip:text; background-clip:text; color:transparent; flex-shrink:0;
+}
+#hud{ display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-shrink:0; }
+.side{ flex:1; }
+.side.cpu{ text-align:right; }
+.side .name{ font-size:clamp(9px,2.4vw,12px); font-weight:bold; letter-spacing:1.5px; margin-bottom:3px; }
+.side.you .name{ color:var(--blue); } .side.cpu .name{ color:var(--red); }
+.diffTag{ font-size:9px; background:#fff2; padding:1px 5px; border-radius:6px; margin-left:4px; }
+.healthWrap{ height:11px; border-radius:8px; background:#241820; border:1px solid #4a3a44; overflow:hidden; }
+.healthFill{ height:100%; width:100%; transition:width .25s ease; }
+.youFill{ background:linear-gradient(90deg,#123a9c,var(--blue)); margin-left:auto; }
+.cpuFill{ background:linear-gradient(90deg,var(--red),#9c1212); }
+#timer{ font-size:clamp(15px,4vw,22px); font-weight:900; color:var(--gold); min-width:40px; text-align:center; font-variant-numeric:tabular-nums; text-shadow:0 0 10px rgba(255,207,77,.6); }
+
+/* ---- Cinematic letterboxed arena: fixed-ratio window even inside a portrait shell ---- */
+#arenaOuter{
+  flex:1; min-height:0; position:relative; border-radius:14px; overflow:hidden;
+  border:3px solid #3a2a3f; background:#0e0a13; box-shadow:inset 0 0 60px rgba(0,0,0,.7);
+}
+#stage{ position:absolute; top:0; left:0; width:960px; height:480px; transform-origin:0 0; overflow:hidden; }
+#bgLayers{ position:absolute; inset:0; overflow:hidden; }
+.bgLayer{ position:absolute; top:0; left:0; height:480px; }
+#world{ position:absolute; top:0; left:0; width:1px; height:1px; transform-origin:0 0; }
+
+.fighter{ position:absolute; width:70px; text-align:center; z-index:5; transform:translate(-50%,-100%); }
+.leanWrap{ transform-origin:50% 62%; }
+.rigWrap{ transition:transform .08s ease; }
+.flipSpin{ transform-origin:50% 58%; }
+.platform{ width:60%; height:8px; margin:2px auto 0; border-radius:50%; filter:blur(1px); }
+.fighter.p1 .platform{ background:radial-gradient(ellipse,rgba(46,107,255,.55),transparent 70%); }
+.fighter.p2 .platform{ background:radial-gradient(ellipse,rgba(255,59,59,.55),transparent 70%); }
+.rig{ width:100%; display:block; overflow:visible; filter:drop-shadow(0 4px 5px rgba(0,0,0,.5)); }
+.fighter.p1 .rig{ color:var(--blue); } .fighter.p2 .rig{ color:var(--red); }
+
+.armFrontUpper,.armBackUpper{ transform-origin:30px 27px; }
+.armFrontLower{ transform-origin:37px 42px; }
+.armBackLower{ transform-origin:23px 42px; }
+.legFrontUpper,.legBackUpper{ transform-origin:30px 58px; }
+.legFrontLower{ transform-origin:37px 75px; }
+.legBackLower{ transform-origin:24px 75px; }
+.torsoG{ transform-origin:30px 58px; }
+
+@keyframes idleBreathe{
+  0%,100%{ transform:translateY(0) scale(1,1); }
+  50%{ transform:translateY(-1.4px) scale(1.015,0.985); }
+}
+.fighter:not(.jump):not(.flipping):not(.blocking):not(.dashing):not(.hitflash):not(.attack-punch):not(.attack-kick):not(.attack-heavy):not(.attack-lowkick):not(.ko) .rigWrap{
+  animation:idleBreathe 2.3s ease-in-out infinite;
+}
+
+/* ---- Jump pose (CSS-only tuck; JS handles the actual world height) ---- */
+.fighter.jump .legFrontUpper{ transform:rotate(-30deg); }
+.fighter.jump .legFrontLower{ transform:rotate(46deg); }
+.fighter.jump .legBackUpper{ transform:rotate(24deg); }
+.fighter.jump .legBackLower{ transform:rotate(-38deg); }
+
+/* ---- Block/guard crouch ---- */
+.fighter.blocking .legFrontUpper{ transform:rotate(-14deg); transition:transform .12s ease; }
+.fighter.blocking .legFrontLower{ transform:rotate(20deg); transition:transform .12s ease; }
+.fighter.blocking .legBackUpper{ transform:rotate(10deg); transition:transform .12s ease; }
+.fighter.blocking .legBackLower{ transform:rotate(-16deg); transition:transform .12s ease; }
+.fighter.blocking .armFrontUpper{ transform:rotate(24deg); transition:transform .12s ease; }
+.fighter.blocking .armBackUpper{ transform:rotate(-16deg); transition:transform .12s ease; }
+.fighter.blocking .torsoG{ transform:translateY(5px); transition:transform .12s ease; }
+
+/* ---- Punch / rush: torso lunge only — the arm itself is IK-driven every frame by fighter.js ---- */
+@keyframes punchTorso{
+  0%,100%{ transform:translateX(0) rotate(0deg) scale(1,1); }
+  35%{ transform:translateX(5px) rotate(-8deg) scale(1.05,0.96); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
+  60%{ transform:translateX(2px) rotate(-3deg) scale(1,1); }
+}
+.fighter.attack-punch .torsoG{ animation:punchTorso .3s ease-out; }
+.fighter.ikStretch .armFrontLower{ filter:drop-shadow(0 0 6px currentColor) brightness(1.3); }
+
+@keyframes rushTorso{
+  0%,100%{ transform:translateX(0) rotate(0deg) scale(1,1); }
+  25%{ transform:translateX(10px) rotate(-10deg) scale(1.1,0.92); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
+  60%{ transform:translateX(4px) rotate(-4deg) scale(1,1); }
+}
+.fighter.attack-heavy .torsoG{ animation:rushTorso .34s ease-out; }
+.fighter.attack-heavy .rig{ filter:drop-shadow(0 0 16px var(--gold)) brightness(1.35); }
+
+/* ---- Kick ---- */
+@keyframes kickThigh{
+  0%{ transform:rotate(0deg); }
+  22%{ transform:rotate(34deg); animation-timing-function:cubic-bezier(0.05,0.9,0.1,1.0); }
+  50%{ transform:rotate(-128deg); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
+  75%{ transform:rotate(-96deg); animation-timing-function:ease-out; }
+  100%{ transform:rotate(0deg); }
+}
+@keyframes kickShin{
+  0%{ transform:rotate(0deg); }
+  22%{ transform:rotate(58deg); animation-timing-function:cubic-bezier(0.05,0.9,0.1,1.0); }
+  50%{ transform:rotate(-78deg); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
+  75%{ transform:rotate(-46deg); animation-timing-function:ease-out; }
+  100%{ transform:rotate(0deg); }
+}
+@keyframes kickTorso{
+  0%,100%{ transform:translateX(0) rotate(0deg); }
+  50%{ transform:translateX(7px) rotate(-14deg); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
+  75%{ transform:translateX(2px) rotate(-4deg); }
+}
+.fighter.attack-kick .legFrontUpper{ animation:kickThigh .32s linear; }
+.fighter.attack-kick .legFrontLower{ animation:kickShin .32s linear; }
+.fighter.attack-kick .torsoG{ animation:kickTorso .32s linear; }
+.fighter.attack-kick.aerial .rig{ filter:drop-shadow(0 0 14px var(--gold)) brightness(1.3); }
+
+@keyframes lowThigh{
+  0%{ transform:rotate(-14deg); }
+  30%{ transform:rotate(2deg); animation-timing-function:cubic-bezier(0.05,0.9,0.1,1.0); }
+  55%{ transform:rotate(-62deg); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
+  80%{ transform:rotate(-40deg); animation-timing-function:ease-out; }
+  100%{ transform:rotate(-14deg); }
+}
+@keyframes lowShin{
+  0%{ transform:rotate(20deg); }
+  30%{ transform:rotate(4deg); animation-timing-function:cubic-bezier(0.05,0.9,0.1,1.0); }
+  55%{ transform:rotate(-34deg); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
+  80%{ transform:rotate(-18deg); animation-timing-function:ease-out; }
+  100%{ transform:rotate(20deg); }
+}
+.fighter.attack-lowkick .legFrontUpper{ animation:lowThigh .3s linear; }
+.fighter.attack-lowkick .legFrontLower{ animation:lowShin .3s linear; }
+.fighter.attack-lowkick .torsoG{ transform:translateY(5px); }
+
+/* ---- Flip: whole rig spins on its own axis while root motion is handled in JS ---- */
+@keyframes flipFwd{ 0%{ transform:rotate(0deg); } 100%{ transform:rotate(360deg); } }
+@keyframes flipBack{ 0%{ transform:rotate(0deg); } 100%{ transform:rotate(-360deg); } }
+.fighter.flipping .rig{ filter:drop-shadow(0 0 10px currentColor) brightness(1.2); }
+
+/* ---- Dash trail / hit / KO ---- */
+.fighter.dashing .rig{ filter:blur(1.4px) drop-shadow(0 0 16px currentColor) brightness(1.35) saturate(1.3); }
+.fighter.hitflash .rig{ filter:drop-shadow(0 0 14px #fff) brightness(2); }
+.fighter.ko .rigWrap{ transform:rotate(90deg) translateY(10px); transition:transform .4s cubic-bezier(.34,1.2,.64,1); }
+.afterimage{ opacity:.5; pointer-events:none; z-index:3; transition:opacity .24s linear; }
+
+.mouthOpen,.mouthNeutral{ transition:opacity .08s; }
+
+.comboPopup{
+  position:absolute; top:-20px; left:50%; transform:translateX(-50%); font-size:11px; font-weight:900;
+  color:var(--gold); opacity:0; white-space:nowrap; pointer-events:none; z-index:7;
+}
+.comboPopup.show{ animation:comboPop .7s ease-out forwards; }
+@keyframes comboPop{
+  0%{ opacity:1; transform:translate(-50%,0) scale(.8); }
+  50%{ opacity:1; transform:translate(-50%,-10px) scale(1.2); }
+  100%{ opacity:0; transform:translate(-50%,-24px) scale(1); }
+}
+
+/* ---- Particles: sparks, motion streaks, blood ---- */
+.spark{
+  position:absolute; width:var(--sz); height:var(--sz); border-radius:50%; pointer-events:none; z-index:9;
+  transform:translate(-50%,-50%); box-shadow:0 0 6px currentColor,0 0 2px #fff;
+  animation:sparkFly .5s cubic-bezier(.15,.7,.4,1) forwards;
+}
+@keyframes sparkFly{
+  0%{ transform:translate(-50%,-50%) scale(1); opacity:1; }
+  70%{ opacity:1; }
+  100%{ transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy))) scale(.15); opacity:0; }
+}
+.streak{
+  position:absolute; height:3px; width:var(--sz,14px); border-radius:2px; pointer-events:none; z-index:9;
+  transform-origin:0 50%; box-shadow:0 0 6px currentColor; animation:streakFly .36s cubic-bezier(.16,.84,.32,1) forwards;
+}
+@keyframes streakFly{
+  0%{ opacity:1; transform:translate(-50%,-50%) rotate(var(--ang,0deg)) scaleX(.4); }
+  40%{ opacity:1; }
+  100%{ opacity:0; transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy))) rotate(var(--ang,0deg)) scaleX(1.6); }
+}
+.blood{
+  position:absolute; width:var(--sz); height:var(--sz); border-radius:50% 50% 60% 60%; pointer-events:none; z-index:8;
+  background:var(--blood); transform:translate(-50%,-50%); animation:bloodFall .6s cubic-bezier(.4,.1,.6,1) forwards;
+}
+@keyframes bloodFall{
+  0%{ transform:translate(-50%,-50%) scale(1); opacity:1; }
+  100%{ transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy))) scale(.7); opacity:0; }
+}
+
+body.hitstop .fighter, body.hitstop .fighter *,
+body.hitstop .spark, body.hitstop .streak, body.hitstop .blood{ animation-play-state:paused !important; }
+
+#koFlash{ position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:12; }
+#koFlash.show{ animation:koFlashFade .45s ease-out; }
+@keyframes koFlashFade{ 0%{ opacity:.55; } 100%{ opacity:0; } }
+
+#banner{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:clamp(20px,5vw,34px); font-weight:900; letter-spacing:2px; text-align:center; padding:10px;
+  color:#fff; text-shadow:0 0 20px rgba(0,0,0,.8),0 0 10px var(--gold); opacity:0; transform:scale(.5);
+  pointer-events:none; transition:opacity .2s; z-index:15;
+}
+#banner.show{ opacity:1; animation:bannerPop .36s cubic-bezier(.34,1.56,.64,1); }
+@keyframes bannerPop{
+  0%{ opacity:0; transform:scale(.5) translateY(10px); }
+  55%{ opacity:1; transform:scale(1.1); }
+  100%{ opacity:1; transform:scale(1); }
+}
+#banner.taunt{ font-size:clamp(15px,4vw,24px); color:var(--gold); }
+
+.screenOverlay{
+  position:absolute; inset:0; background:rgba(10,8,14,.92); display:none; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center; gap:12px; z-index:25; padding:16px;
+}
+.screenOverlay h2{ font-size:clamp(18px,5vw,28px); margin:0; letter-spacing:2px; }
+.overlayBtns{ display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
+.overlayBtns button{
+  border:none; color:#fff; font-weight:bold; padding:11px 20px; border-radius:26px; cursor:pointer;
+  font-size:13px; letter-spacing:.5px; box-shadow:0 4px 14px rgba(0,0,0,.4);
+}
+#restartBtn,#resumeBtn{ background:linear-gradient(90deg,var(--blue),var(--red)); }
+#changeBtn,#pauseExitBtn{ background:#3a2a3f; }
+#pauseRestartBtn{ background:#4a3a20; }
+
+#pauseBtn{
+  position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:18;
+  width:34px; height:26px; border:1px solid rgba(255,255,255,.25); border-radius:8px;
+  background:rgba(20,15,24,.55); color:#f4ecff; font-size:11px; display:flex; align-items:center;
+  justify-content:center; cursor:pointer; touch-action:none;
+}
+
+/* ================= Controls ================= */
+#controls{ display:flex; align-items:center; justify-content:space-between; padding:8px 12px; flex-shrink:0; gap:10px; }
+.dpad{ display:flex; gap:8px; flex-shrink:0; }
+.dpadBtn{
+  width:clamp(48px,13vw,64px); height:clamp(48px,13vw,64px); border-radius:14px; border:2px solid #4a3a50;
+  background:radial-gradient(circle at 40% 35%,#2e2233,#1a1420 75%); color:#cfc4d8; font-size:20px; cursor:pointer; touch-action:none;
+}
+.dpadBtn:active{ background:#3a2a44; }
+.actionCluster{
+  display:grid; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(2,1fr); gap:5px;
+  width:clamp(150px,44vw,210px); flex-shrink:0;
+}
+.actionCluster button{
+  border:none; border-radius:10px; font-weight:900; color:#fff; font-size:clamp(9px,2.6vw,12px);
+  display:flex; align-items:center; justify-content:center; height:clamp(34px,8.5vw,44px); touch-action:none;
+  opacity:.92; letter-spacing:.3px; background:linear-gradient(180deg,#3a7bff,var(--blue-dark)); box-shadow:0 3px 0 #0a2570;
+}
+.actionCluster button:active{ opacity:1; transform:scale(.94); }
+.btnJump{ grid-column:2; grid-row:1; }
+.btnPunch{ grid-column:1; grid-row:2; background:linear-gradient(180deg,#ff5c5c,var(--red-dark)); box-shadow:0 3px 0 #6e0d0d; }
+.btnKick{ grid-column:3; grid-row:2; background:linear-gradient(180deg,#ff5c5c,var(--red-dark)); box-shadow:0 3px 0 #6e0d0d; }
+.btnBlock{ grid-column:2; grid-row:2; background:linear-gradient(180deg,#7fffd4,#1f9c78); box-shadow:0 3px 0 #0f5c48; color:#0a2018; }
+
+.footHint{ text-align:center; font-size:8.5px; opacity:.4; flex-shrink:0; padding:1px 0; }
