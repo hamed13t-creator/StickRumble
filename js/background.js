@@ -1,11 +1,29 @@
-// js/background.js — layered parallax stadium crowd background. Each layer scrolls 
-// at a different fraction of camera movement to create intense depth behind the fighters.
+// js/background.js — layered parallax skyline. Each layer scrolls at a different
+// fraction of camera movement (far layers move less) to sell depth behind the fight.
 import { WORLD_W, STAGE_W, STAGE_H } from './world.js';
 
-// Deterministic pseudo-random so the crowd layout stays stable across reloads/rounds.
+// Deterministic pseudo-random so the skyline is stable across reloads/rounds.
 function seeded(seed) {
   let s = seed;
   return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+}
+
+function buildRoofline(rand, count, minH, maxH, w, baseY) {
+  let x = -80, d = `M-80,${baseY} `;
+  const pts = [];
+  while (x < w + 80) {
+    const bw = 40 + rand() * 90;
+    const bh = minH + rand() * (maxH - minH);
+    pts.push({ x, w: bw, h: bh });
+    x += bw + rand() * 14;
+  }
+  pts.forEach(p => {
+    d += `L${p.x},${baseY - p.h} L${p.x + p.w * 0.55},${baseY - p.h} `;
+    d += `L${p.x + p.w * 0.55},${baseY - p.h - 6} L${p.x + p.w},${baseY - p.h - 6} `;
+    d += `L${p.x + p.w},${baseY} `;
+  });
+  d += `L${w + 80},${baseY} Z`;
+  return { path: d, blocks: pts };
 }
 
 export class ParallaxBackground {
@@ -28,74 +46,57 @@ export class ParallaxBackground {
   }
 
   _build() {
-    // Layer 0: Deep arena walls, atmospheric stadium fog, and overhead harsh spotlights
-    const back = this._makeLayer(0.05, 1.2);
-    back.el.innerHTML = `
+    // Layer 0: night sky gradient + moon (near-static, barely parallaxes)
+    const sky = this._makeLayer(0.02, 1.3);
+    sky.el.innerHTML = `
       <defs>
-        <radialGradient id="spotlight" cx="50%" cy="0%" r="70%">
-          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
-          <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+        <radialGradient id="moonGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ffe9a8" stop-opacity=".9"/>
+          <stop offset="100%" stop-color="#ffe9a8" stop-opacity="0"/>
         </radialGradient>
-        <linearGradient id="wallGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#0f0f17"/>
-          <stop offset="100%" stop-color="#1c1624"/>
-        </linearGradient>
       </defs>
-      <rect width="${back.width}" height="${STAGE_H}" fill="url(#wallGrad)"/>
-      <!-- Overhead Stadium Lights / Beams -->
-      <polygon points="${back.width * 0.2},0 0,${STAGE_H} ${back.width * 0.08},${STAGE_H}" fill="url(#spotlight)"/>
-      <polygon points="${back.width * 0.8},0 ${back.width},${STAGE_H} ${back.width * 0.92},${STAGE_H}" fill="url(#spotlight)"/>
-      <polygon points="${back.width * 0.5},0 ${back.width * 0.35},${STAGE_H} ${back.width * 0.65},${STAGE_H}" fill="url(#spotlight)" opacity="0.7"/>
+      <circle cx="${sky.width * 0.78}" cy="90" r="70" fill="url(#moonGlow)"/>
+      <circle cx="${sky.width * 0.78}" cy="90" r="30" fill="#fff6da"/>
+      ${Array.from({ length: 40 }, (_, i) => {
+        const r = seeded(i + 1)();
+        return `<circle cx="${r * sky.width}" cy="${20 + seeded(i + 99)() * 160}" r="${0.6 + seeded(i + 7)() * 1.2}" fill="#fff" opacity="${0.3 + seeded(i + 3)() * 0.5}"/>`;
+      }).join('')}
     `;
-    this.layers.push(back);
+    this.layers.push(sky);
 
-    // Layer 1: Deep Background Crowd (Dense silhouettes of cheering spectators in the upper stands)
-    const farCrowd = this._makeLayer(0.2, 1.5);
-    const rFar = seeded(42);
-    let farHeadsPath = '';
-    for (let x = -50; x < farCrowd.width + 50; x += 14 + rFar() * 8) {
-      const y = STAGE_H * 0.52 + rFar() * 12;
-      const hRad = 5 + rFar() * 3;
-      farHeadsPath += `M ${x - hRad},${y + 35} Q ${x},${y - hRad * 1.5} ${x + hRad},${y + 35} Z `;
-    }
-    farCrowd.el.innerHTML = `
-      <rect x="0" y="${STAGE_H * 0.5}" width="${farCrowd.width}" height="${STAGE_H * 0.5}" fill="#16131c"/>
-      <path d="${farHeadsPath}" fill="#251f30" opacity="0.85"/>
+    // Layer 1: far rooftop skyline silhouette
+    const far = this._makeLayer(0.18, 1.6);
+    const rFar = seeded(11);
+    const roofFar = buildRoofline(rFar, 0, 60, 150, far.width, STAGE_H * 0.72);
+    far.el.innerHTML = `<path d="${roofFar.path}" fill="#241a30"/>` +
+      roofFar.blocks.filter((_, i) => i % 3 === 0).map(b =>
+        `<rect x="${b.x + b.w * 0.2}" y="${STAGE_H * 0.72 - b.h + 10}" width="4" height="6" fill="#ffcf4d" opacity=".55"/>`
+      ).join('');
+    this.layers.push(far);
+
+    // Layer 2: mid rooftops with a pagoda/dojo silhouette + neon window glow
+    const mid = this._makeLayer(0.4, 1.9);
+    const rMid = seeded(23);
+    const roofMid = buildRoofline(rMid, 0, 90, 210, mid.width, STAGE_H * 0.82);
+    const pagX = mid.width * 0.32;
+    mid.el.innerHTML = `
+      <path d="${roofMid.path}" fill="#2f2138"/>
+      <g fill="#2f2138">
+        <path d="M${pagX - 70},${STAGE_H * 0.82} L${pagX - 70},${STAGE_H * 0.5} L${pagX - 90},${STAGE_H * 0.46} L${pagX},${STAGE_H * 0.34} L${pagX + 90},${STAGE_H * 0.46} L${pagX + 70},${STAGE_H * 0.5} L${pagX + 70},${STAGE_H * 0.82} Z"/>
+      </g>
+      <path d="M${pagX - 60},${STAGE_H * 0.5} L${pagX},${STAGE_H * 0.4} L${pagX + 60},${STAGE_H * 0.5}" stroke="#ff3b3b" stroke-width="3" fill="none" opacity=".5"/>
+      ${roofMid.blocks.filter((_, i) => i % 2 === 0).map(b =>
+        `<rect x="${b.x + b.w * 0.15}" y="${STAGE_H * 0.82 - b.h + 14}" width="5" height="8" fill="#2e6bff" opacity=".5"/>`
+      ).join('')}
     `;
-    this.layers.push(farCrowd);
+    this.layers.push(mid);
 
-    // Layer 2: Midground Crowd (Closer row of cheering fans with occasional raised arms/flashes)
-    const midCrowd = this._makeLayer(0.45, 1.8);
-    const rMid = seeded(77);
-    let midHeadsHtml = '';
-    for (let x = -40; x < midCrowd.width + 40; x += 18 + rMid() * 10) {
-      const y = STAGE_H * 0.66 + rMid() * 10;
-      const r = 7 + rMid() * 4;
-      // Alternate bodies and occasional raised arms
-      const raisingArm = rMid() > 0.7;
-      midHeadsHtml += `<circle cx="${x}" cy="${y}" r="${r}" fill="#1a1422"/>`;
-      if (raisingArm) {
-        midHeadsHtml += `<line x1="${x + 4}" y1="${y}" x2="${x + 8}" y2="${y - 18}" stroke="#1a1422" stroke-width="4" stroke-linecap="round"/>`;
-      }
-    }
-    midCrowd.el.innerHTML = `
-      <rect x="0" y="${STAGE_H * 0.64}" width="${midCrowd.width}" height="${STAGE_H * 0.36}" fill="#1f1828"/>
-      <g opacity="0.95">${midHeadsHtml}</g>
-    `;
-    this.layers.push(midCrowd);
-
-    // Layer 3: Arena Ropes, Ring Posts & Steel Barrier Barricade foreground elements
-    const near = this._makeLayer(0.85, 1.15);
+    // Layer 3: near foreground railing/edge — moves almost 1:1 with camera
+    const near = this._makeLayer(0.82, 1.15);
     near.el.innerHTML = `
-      <!-- Ring Ropes Perspective Lines -->
-      <line x1="0" y1="${STAGE_H * 0.74}" x2="${near.width}" y2="${STAGE_H * 0.74}" stroke="#ef4444" stroke-width="4" opacity="0.8"/>
-      <line x1="0" y1="${STAGE_H * 0.81}" x2="${near.width}" y2="${STAGE_H * 0.81}" stroke="#3b82f6" stroke-width="4" opacity="0.8"/>
-      <line x1="0" y1="${STAGE_H * 0.88}" x2="${near.width}" y2="${STAGE_H * 0.88}" stroke="#ffffff" stroke-width="3" opacity="0.7"/>
-
-      <!-- Steel Barricade / Floor Edge -->
-      <rect x="0" y="${STAGE_H - 32}" width="${near.width}" height="32" fill="#120e17"/>
-      ${Array.from({ length: Math.ceil(near.width / 50) }, (_, i) =>
-        `<rect x="${i * 50 + 10}" y="${STAGE_H - 48}" width="8" height="20" fill="#2d2638" rx="2"/>`
+      <rect x="0" y="${STAGE_H - 26}" width="${near.width}" height="26" fill="#1a1420"/>
+      ${Array.from({ length: Math.ceil(near.width / 46) }, (_, i) =>
+        `<rect x="${i * 46}" y="${STAGE_H - 46}" width="6" height="46" fill="#1a1420"/>`
       ).join('')}
     `;
     this.layers.push(near);
