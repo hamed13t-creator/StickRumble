@@ -49,6 +49,41 @@ function noiseBurst(dur, gain, filterFreq, delay = 0) {
   src.stop(t + dur);
 }
 
+// Bandpass-filtered noise sweep — the "roar" bed under a crowd reaction. Swells in
+// quickly then decays, with the filter sweeping upward through the swell so it reads
+// as a wash of voices rather than a flat noise hiss.
+function crowdSwell(dur, gain, freqStart, freqEnd, delay = 0) {
+  const t = ctx.currentTime + delay;
+  const bufSize = Math.floor(ctx.sampleRate * dur);
+  const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'bandpass';
+  filt.Q.value = 0.7;
+  filt.frequency.setValueAtTime(freqStart, t);
+  filt.frequency.linearRampToValueAtTime(freqEnd, t + dur * 0.6);
+  filt.frequency.exponentialRampToValueAtTime(Math.max(200, freqEnd * 0.6), t + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain, t + dur * 0.25);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  src.connect(filt).connect(g).connect(ctx.destination);
+  src.start(t);
+  src.stop(t + dur);
+}
+
+// Scattered short noise ticks layered together to read as applause rather than a
+// single hiss — each clap gets its own random offset, length, and brightness.
+function applauseBurst(count, spread, gain, delay = 0) {
+  for (let i = 0; i < count; i++) {
+    const d = delay + Math.random() * spread;
+    noiseBurst(0.025 + Math.random() * 0.025, gain * (0.6 + Math.random() * 0.4), 3200 + Math.random() * 2400, d);
+  }
+}
+
 const SFX = {
   punch()   { tone(190, 65, 0.09, 'square', 0.22); noiseBurst(0.06, 0.18, 2200); },
   punchHeavy() { tone(140, 45, 0.14, 'square', 0.3); noiseBurst(0.09, 0.24, 1600); },
@@ -69,10 +104,24 @@ const SFX = {
   bell() {
     [880, 1320].forEach((f, i) => tone(f, null, 0.6, 'sine', 0.3, i * 0.05));
   },
-  cheer() {
-    for (let i = 0; i < 6; i++) tone(440 + Math.random() * 440, null, 0.4, 'sine', 0.15, i * 0.08);
+crowdReact() {
+  // Lighter audience pop — a solid combo or a close call, not the full house.
+  crowdSwell(0.55, 0.16, 500, 1500);
+  applauseBurst(7, 0.4, 0.12, 0.05);
+},
+cheer(intensity = 1) {
+  // Full crowd roar — swelling filtered noise ("voices"), layered applause claps,
+  // and scattered pitched whoops on top. Used for match wins; intensity is scalable
+  // if you ever want to call it directly at a lower level elsewhere.
+  const dur = 1.1 + intensity * 0.5;
+  crowdSwell(dur, 0.3 * intensity, 300, 1400);
+  crowdSwell(dur * 0.85, 0.22 * intensity, 500, 2200, 0.05);
+  applauseBurst(Math.round(14 * intensity), dur * 0.9, 0.14, 0.1);
+  const whoops = Math.round(5 + intensity * 4);
+  for (let i = 0; i < whoops; i++) {
+    tone(380 + Math.random() * 500, null, 0.3 + Math.random() * 0.2, 'triangle', 0.09, 0.15 + Math.random() * dur * 0.7);
   }
-};
+},
 
 export const Audio = {
   unlock() { ensure(); },
