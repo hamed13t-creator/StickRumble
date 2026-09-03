@@ -114,7 +114,7 @@ function dispatchEvents(fighter, opp) {
       FX.spawnSparks(ev.x, ev.y, ev.color, SPARKS[tier] ?? 10, tier === 'rush' ? 1.5 : 1);
       if (STREAKS[tier]) FX.spawnStreaks(ev.x, ev.y, ev.color, STREAKS[tier], 1.2);
       if (BLOOD[tier]) FX.spawnBlood(ev.x, ev.y, ev.dirX, BLOOD[tier]);
-      Audio.play(tier === 'rush' ? 'punchHeavy' : (tier === 'kick' || tier === 'lowkick' || tier === 'aerialKick') ? 'kick' : 'punch');
+      Audio.play(tier === 'rush' ? 'special' : (tier === 'kick' || tier === 'lowkick' || tier === 'aerialKick') ? 'kick' : 'punch');
       if (fighter.comboCount >= 2) {
         const el = fighter.rig.combo;
         el.textContent = fighter.comboCount + 'x COMBO!';
