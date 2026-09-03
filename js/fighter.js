@@ -558,6 +558,7 @@ export class Fighter {
     if (r.svg) r.svg.style.transform = `scaleX(${this.facing >= 0 ? 1 : -1})`;
     el.classList.toggle('jump', !this.grounded && this.state !== 'flip');
     el.classList.toggle('flipping', this.state === 'flip');
+    el.classList.toggle('landing', this.state === 'landing');
     el.classList.toggle('ko', this.state === 'ko');
 
     // ---- Whole-body lean: velocity sway + idle weight-shift + attack anticipation/drive
