@@ -218,7 +218,7 @@ function startRound() {
   match.roundTime = ROUND_TIME;
   timerEl.textContent = match.roundTime;
   match.roundActive = false;
-  camera.centerX = WORLD_W / 2; camera.viewW = 640; camera.trauma = 0;
+  camera.reset();
   camera.applyTransform();
   background.update(camera.centerX, camera.getZoom());
   updateHealthBars();
