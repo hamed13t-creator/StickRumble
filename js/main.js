@@ -117,9 +117,10 @@ function dispatchEvents(fighter, opp) {
       Audio.play(tier === 'rush' ? 'special' : (tier === 'kick' || tier === 'lowkick' || tier === 'aerialKick') ? 'kick' : 'punch');
       if (fighter.comboCount >= 2) {
         const el = fighter.rig.combo;
-        el.textContent = fighter.comboCount + 'x COMBO!';
-        el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
-      }
+      el.textContent = fighter.comboCount + 'x COMBO!';
+      el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+      if (fighter.comboCount >= 3) Audio.play('crowdReact');
+    }
       updateHealthBars();
       if (opp.health <= 0 && match.roundActive) endRound('ko', fighter === p1 ? 'p1' : 'p2');
     } else if (ev.type === 'block') {
@@ -141,6 +142,7 @@ function dispatchEvents(fighter, opp) {
       applyHitStop(HITSTOP.ko);
       FX.spawnSparks(ev.x, ev.y, '#ffffff', 30, 1.8);
       Audio.play('ko');
+      Audio.play('crowdReact');
     }
   }
 }
@@ -237,8 +239,9 @@ function endRound(reason, winnerSide) {
     else if (p1.hits > p2.hits) winner = 'p1';
     else if (p2.hits > p1.hits) winner = 'p2';
   }
-  if (winner === 'p1') match.p1Wins++; else if (winner === 'p2') match.p2Wins++;
-  Audio.play('bell');
+    if (winner === 'p1') match.p1Wins++; else if (winner === 'p2') match.p2Wins++;
+    Audio.play('bell');
+    if (winner) Audio.play('crowdReact');
 
   const text = winner === 'p1' ? '🔵 YOU WIN ROUND ' + match.round
     : winner === 'p2' ? '🔴 CPU WINS ROUND ' + match.round
