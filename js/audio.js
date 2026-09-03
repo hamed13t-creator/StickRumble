@@ -122,6 +122,7 @@ cheer(intensity = 1) {
     tone(380 + Math.random() * 500, null, 0.3 + Math.random() * 0.2, 'triangle', 0.09, 0.15 + Math.random() * dur * 0.7);
   }
 },
+};
 
 export const Audio = {
   unlock() { ensure(); },
