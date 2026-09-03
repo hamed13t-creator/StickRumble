@@ -2,8 +2,16 @@
 let ctx = null;
 
 function ensure() {
-  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-  if (ctx.state === 'suspended') ctx.resume();
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    // Auto-recover when the app comes back to the foreground — mobile browsers/PWAs
+    // routinely suspend the AudioContext on backgrounding/screen-lock, and nothing
+    // else in this file ever called resume() again after the initial unlock().
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+    });
+  }
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   return ctx;
 }
 
