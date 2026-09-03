@@ -78,6 +78,7 @@ export const Audio = {
   unlock() { ensure(); },
   play(name) {
     if (!ctx) return; // stays silent until unlock() has been called from a user gesture
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {}); // reactive backstop alongside the visibilitychange listener
     const fn = SFX[name];
     if (fn) fn();
   }
