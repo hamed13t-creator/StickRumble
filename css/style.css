@@ -98,7 +98,7 @@ h1.title{
   0%,100%{ transform:translateY(0) scale(1,1); }
   50%{ transform:translateY(-1.4px) scale(1.015,0.985); }
 }
-.fighter:not(.jump):not(.flipping):not(.blocking):not(.dashing):not(.hitflash):not(.attack-punch):not(.attack-kick):not(.attack-heavy):not(.attack-lowkick):not(.ko) .rigWrap{
+.fighter:not(.jump):not(.flipping):not(.blocking):not(.dashing):not(.hitflash):not(.attack-punch):not(.attack-kick):not(.attack-heavy):not(.attack-lowkick):not(.landing):not(.ko) .rigWrap{
   animation:idleBreathe 2.3s ease-in-out infinite;
 }
 
