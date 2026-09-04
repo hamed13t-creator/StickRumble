@@ -16,6 +16,7 @@ export function triggerHitStop(ms) {
 }
 
 function spawnEl(cls) {
+  if (!fxLayer) return null;
   const el = document.createElement('div');
   el.className = cls;
   fxLayer.appendChild(el);
@@ -28,6 +29,7 @@ function spawnEl(cls) {
 export function spawnSparks(x, y, color, count = 10, power = 1) {
   for (let i = 0; i < count; i++) {
     const el = spawnEl('spark');
+    if (!el) return;
     const angle = Math.random() * Math.PI * 2;
     const dist = (18 + Math.random() * 34) * power;
     el.style.left = x + 'px'; el.style.top = y + 'px';
@@ -41,6 +43,7 @@ export function spawnSparks(x, y, color, count = 10, power = 1) {
 export function spawnStreaks(x, y, color, count = 4, power = 1) {
   for (let i = 0; i < count; i++) {
     const el = spawnEl('streak');
+    if (!el) return;
     const angle = Math.random() * Math.PI * 2;
     const dist = (26 + Math.random() * 40) * power;
     el.style.left = x + 'px'; el.style.top = y + 'px';
@@ -59,6 +62,7 @@ export function spawnBlood(x, y, dirX, power = 1) {
   const count = Math.round(7 * power);
   for (let i = 0; i < count; i++) {
     const el = spawnEl('blood');
+    if (!el) return;
     const angle = (dirX >= 0 ? -0.5 : Math.PI + 0.5) + (Math.random() - 0.5) * 1.6;
     const dist = (14 + Math.random() * 30) * power;
     el.style.left = x + 'px'; el.style.top = y + 'px';
@@ -72,7 +76,9 @@ export function spawnBlood(x, y, dirX, power = 1) {
 // and fades it out in place — used for dashes, flips, and fast whiffed strikes.
 const AFTERIMAGE_STRIP = ['hitflash', 'dashing', 'flipping', 'attack-punch', 'attack-kick',
   'attack-heavy', 'blocking', 'jump', 'special'];
+
 export function spawnAfterimage(fighterEl, tint) {
+  if (!fighterEl || !fighterEl.parentNode) return;
   const ghost = fighterEl.cloneNode(true);
   ghost.removeAttribute('id');
   AFTERIMAGE_STRIP.forEach(c => ghost.classList.remove(c));
@@ -88,10 +94,12 @@ export function spawnAfterimage(fighterEl, tint) {
 }
 
 export function pulseClass(el, cls, dur) {
+  if (!el) return;
   el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
   setTimeout(() => el.classList.remove(cls), dur);
 }
 
 export function flashKO(koFlashEl) {
+  if (!koFlashEl) return;
   koFlashEl.classList.remove('show'); void koFlashEl.offsetWidth; koFlashEl.classList.add('show');
 }
