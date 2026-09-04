@@ -35,7 +35,13 @@ function noteDirectionTap(dir) {
 // Stamped at the moment of the raw down-event (so it's captured even on frames the
 // game loop never polls), and cleared to 0 once edgesFrom() consumes it — so one
 // physical press still only ever yields one edge, just a more forgiving one.
-const INPUT_BUFFER_MS = 150;
+// BUGFIX: this was 150ms, shorter than the ~320ms KO hit-stop freeze the module's own
+// header comment says buffering exists to survive (main.js stops polling input for up
+// to that long). A press stamped near the start of a long freeze expired before
+// edgesFrom() ever got called again, so it was silently dropped — the exact failure the
+// buffering was built to prevent. Matched to DASH_WINDOW (320ms) below, which already
+// reflects the correct figure.
+const INPUT_BUFFER_MS = 320;
 const pressStamp = { punch: 0, kick: 0, jump: 0 };
 
 function stampPress(key) {
