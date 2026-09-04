@@ -165,8 +165,7 @@ export class ParallaxBackground {
   }
 
   _build() {
-    // Layer 0: night sky, moon, stars, and a soft violet floodlight haze near the
-    // horizon (the arena's ambient glow bouncing off the open night sky).
+    // Layer 0: night sky, moon, stars, and a soft violet floodlight haze near the horizon.
     const sky = this._makeLayer(0.02, 1.3);
     sky.el.innerHTML = `
       <defs>
@@ -194,8 +193,7 @@ export class ParallaxBackground {
     truss.el.innerHTML = buildSpotlightRig(seeded(17), truss.width, 6);
     this.layers.push(truss);
 
-    // Layer 2: far stadium tiers packed with distant crowd, the glowing jumbotron
-    // marquee, and two sponsor-style emblem banners flanking it.
+    // Layer 2: far stadium tiers packed with distant crowd, marquee, and banners.
     const far = this._makeLayer(0.2, 1.6);
     const rFar = seeded(29);
     const farBaseY = STAGE_H * 0.86;
@@ -210,8 +208,7 @@ export class ParallaxBackground {
     far.el.innerHTML = farHtml;
     this.layers.push(far);
 
-    // Layer 3: mid tiers — closer, larger crowd with more flag-waving, plus scattered
-    // camera flashes for energy.
+    // Layer 3: mid tiers — closer, larger crowd with more flag-waving and flashes.
     const mid = this._makeLayer(0.42, 1.9);
     const rMid = seeded(41);
     const midBaseY = STAGE_H * 0.98;
@@ -223,9 +220,7 @@ export class ParallaxBackground {
     mid.el.innerHTML = midHtml;
     this.layers.push(mid);
 
-    // Layer 4: near foreground — front-row barrier, warm floor-light pooling, and
-    // soft out-of-focus bokeh blobs for a shallow-depth-of-field feel right at the
-    // edge of frame. Moves almost 1:1 with camera.
+    // Layer 4: near foreground — barrier, floor-light pooling, and bokeh blobs.
     const near = this._makeLayer(0.82, 1.15);
     const rNear = seeded(53);
     near.el.innerHTML = `
@@ -251,12 +246,13 @@ export class ParallaxBackground {
     this.layers.push(near);
   }
 
-  update(cameraCenterX, zoom) {
+  update(cameraCenterX, zoom = 1) {
     this.layers.forEach(layer => {
       const shift = (cameraCenterX - WORLD_W / 2) * layer.factor;
       const baseOffset = (layer.width - STAGE_W) / 2;
       const tx = -baseOffset - shift;
-      layer.el.style.transform = `translateX(${tx.toFixed(1)}px)`;
+      layer.el.style.transform = `translateX(${tx.toFixed(1)}px) scale(${zoom})`;
+      layer.el.style.transformOrigin = 'center center';
     });
   }
 }
