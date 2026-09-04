@@ -349,6 +349,9 @@ export class Fighter {
     if (opp.state === 'block' && t !== 'rush') {
       this.attackOutcome = 'block';
       dmg *= 0.22;
+      // BUGFIX: chip damage was computed (dmg *= 0.22) but never subtracted from
+      // opp.health, so blocking was 100% free — no chip damage ever landed.
+      opp.health = Math.max(0, opp.health - dmg);
       opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 });
       opp.hitReaction = { tier: 'block', start: this.timeSec };
       const kb = timing.kb * 0.4;
@@ -666,7 +669,13 @@ export class Fighter {
         const sol = armIK.solve(ARM_ROOT, target, 1);
         const upperDeg = (sol.upperAngle - ARM_REST_U) * 180 / Math.PI;
         const lowerDeg = ((sol.lowerAngle - ARM_REST_L) * 180 / Math.PI) - upperDeg;
-        r.armFU.style.transform = `rotate(${upperDeg.toFixed(1)}deg)`;
+        // BUGFIX: sol.stretch was computed by the IK solver (needed because the punch's
+        // full-extension keyframe, ~39 units from the shoulder, sits beyond the arm's
+        // ~36-unit max natural reach) but was never applied — the fist visibly fell short
+        // of the keyframe on every punch. A uniform scale pivoted at the shoulder (armFU's
+        // own transform-origin) elongates the whole nested chain (armFU + armFL) radially,
+        // so it composes cleanly with the existing rotate().
+        r.armFU.style.transform = `rotate(${upperDeg.toFixed(1)}deg) scale(${sol.stretch.toFixed(3)})`;
         r.armFL.style.transform = `rotate(${lowerDeg.toFixed(1)}deg)`;
       }
     } else if (this.state === 'idle') {
