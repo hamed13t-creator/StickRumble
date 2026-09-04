@@ -35,22 +35,32 @@ export class AI {
   decide(self, opp, now) {
     this.dashDir = 0;
 
+    // Reset all action flags at the start of every tick to prevent sticky inputs
+    this.decision.left = false;
+    this.decision.right = false;
+    this.decision.jump = false;
+    this.decision.punch = false;
+    this.decision.kick = false;
+    this.decision.block = false;
+
     // Fast reflex layer: react to the opponent's active attack telegraph on a much
     // shorter clock than the strategic decision below, gated by blockChance so lower
     // tiers still get hit clean sometimes instead of turtling perfectly.
     const oppTelegraphing = opp.state === 'attack' && opp.attackPhase === 'startup';
     const dist = Math.abs(self.x - opp.x);
+    
+    // Quick reflex block against active attacks
     if (oppTelegraphing && dist < 130 && Math.random() < this.tier.blockChance) {
       this.decision.block = true;
-    } else if (now > this.nextDecisionAt) {
-      this.decision.block = false;
     }
-
+    
+    // Throttle strategic decisions
     if (now < this.nextDecisionAt) return this.decision;
 
     const t = this.tier;
     const [rMin, rMax] = t.reactionMs;
-    this.nextDecisionAt = now + (rMin + Math.random() * (rMax - rMin)) / 1000; // reactionMs table is in ms; `now` here is seconds
+    // reactionMs table is in ms; `now` is in seconds, so convert ms to seconds via / 1000
+    this.nextDecisionAt = now + (rMin + Math.random() * (rMax - rMin)) / 1000;
 
     const facing = self.x < opp.x ? 1 : -1;
     const [gMin, gMax] = t.preferredGap;
@@ -59,9 +69,6 @@ export class AI {
     // Mistake roll: occasionally do something suboptimal so lower tiers feel human,
     // not omniscient.
     const mistake = Math.random() < t.mistakeRate;
-
-    this.decision.left = false; this.decision.right = false;
-    this.decision.jump = false; this.decision.punch = false; this.decision.kick = false;
 
     const canAct = self.state === 'idle' || self.state === 'walk';
 
