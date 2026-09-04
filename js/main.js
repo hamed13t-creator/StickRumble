@@ -88,8 +88,6 @@ let match = null; // { round, p1Wins, p2Wins, matchOver, roundActive, paused, ro
 let timerInterval = null, loopId = null, lastFrameTime = 0;
 
 // ---------------- Tier tables for combat juice ----------------
-// Camera trauma is 0..1 (see camera.js), so these are fractional trauma contributions,
-// not raw pixel magnitudes — small taps barely register, big hits push toward max shake.
 const SHAKE = { punch: 0.16, kick: 0.32, lowkick: 0.26, rush: 0.55, aerialKick: 0.42, block: 0.1, ko: 0.95 };
 const HITSTOP = { punch: 55, kick: 105, lowkick: 85, rush: 190, aerialKick: 150, block: 45, ko: 320 };
 const SPARKS = { punch: 9, kick: 15, lowkick: 12, rush: 22, aerialKick: 18, block: 8 };
@@ -106,7 +104,11 @@ function applyHitStop(ms) {
 }
 
 function dispatchEvents(fighter, opp) {
-  for (const ev of fighter.events) {
+  // FIX: Clear fighter events immediately to prevent infinite event re-triggering across frames
+  const events = fighter.events;
+  fighter.events = [];
+
+  for (const ev of events) {
     if (ev.type === 'hit') {
       const tier = ev.tier;
       camera.shake(SHAKE[tier] ?? 2);
@@ -117,10 +119,10 @@ function dispatchEvents(fighter, opp) {
       Audio.play(tier === 'rush' ? 'special' : (tier === 'kick' || tier === 'lowkick' || tier === 'aerialKick') ? 'kick' : 'punch');
       if (fighter.comboCount >= 2) {
         const el = fighter.rig.combo;
-      el.textContent = fighter.comboCount + 'x COMBO!';
-      el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
-      if (fighter.comboCount >= 3) Audio.play('crowdReact');
-    }
+        el.textContent = fighter.comboCount + 'x COMBO!';
+        el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+        if (fighter.comboCount >= 3) Audio.play('crowdReact');
+      }
       updateHealthBars();
       if (opp.health <= 0 && match.roundActive) endRound('ko', fighter === p1 ? 'p1' : 'p2');
     } else if (ev.type === 'block') {
@@ -239,9 +241,9 @@ function endRound(reason, winnerSide) {
     else if (p1.hits > p2.hits) winner = 'p1';
     else if (p2.hits > p1.hits) winner = 'p2';
   }
-    if (winner === 'p1') match.p1Wins++; else if (winner === 'p2') match.p2Wins++;
-    Audio.play('bell');
-    if (winner) Audio.play('crowdReact');
+  if (winner === 'p1') match.p1Wins++; else if (winner === 'p2') match.p2Wins++;
+  Audio.play('bell');
+  if (winner) Audio.play('crowdReact');
 
   const text = winner === 'p1' ? '🔵 YOU WIN ROUND ' + match.round
     : winner === 'p2' ? '🔴 CPU WINS ROUND ' + match.round
@@ -328,5 +330,6 @@ if ('serviceWorker' in navigator) {
   });
 }
 try {
-  if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(() => {});
+  // FIX: Fighting games require landscape orientation rather than portrait
+  if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
 } catch (e) {}
