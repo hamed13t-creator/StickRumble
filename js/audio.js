@@ -85,7 +85,7 @@ function applauseBurst(count, spread, gain, delay = 0) {
 }
 
 const SFX = {
-  punch()   { tone(190, 65, 0.09, 'square', 0.22); noiseBurst(0.06, 0.18, 2200); },
+  punch()    { tone(190, 65, 0.09, 'square', 0.22); noiseBurst(0.06, 0.18, 2200); },
   punchHeavy() { tone(140, 45, 0.14, 'square', 0.3); noiseBurst(0.09, 0.24, 1600); },
   kick()    { tone(120, 38, 0.2, 'sawtooth', 0.32); noiseBurst(0.12, 0.26, 1200); },
   block()   { tone(520, 380, 0.09, 'triangle', 0.2); },
@@ -104,31 +104,27 @@ const SFX = {
   bell() {
     [880, 1320].forEach((f, i) => tone(f, null, 0.6, 'sine', 0.3, i * 0.05));
   },
-crowdReact() {
-  // Lighter audience pop — a solid combo or a close call, not the full house.
-  crowdSwell(0.55, 0.16, 500, 1500);
-  applauseBurst(7, 0.4, 0.12, 0.05);
-},
-cheer(intensity = 1) {
-  // Full crowd roar — swelling filtered noise ("voices"), layered applause claps,
-  // and scattered pitched whoops on top. Used for match wins; intensity is scalable
-  // if you ever want to call it directly at a lower level elsewhere.
-  const dur = 1.1 + intensity * 0.5;
-  crowdSwell(dur, 0.3 * intensity, 300, 1400);
-  crowdSwell(dur * 0.85, 0.22 * intensity, 500, 2200, 0.05);
-  applauseBurst(Math.round(14 * intensity), dur * 0.9, 0.14, 0.1);
-  const whoops = Math.round(5 + intensity * 4);
-  for (let i = 0; i < whoops; i++) {
-    tone(380 + Math.random() * 500, null, 0.3 + Math.random() * 0.2, 'triangle', 0.09, 0.15 + Math.random() * dur * 0.7);
-  }
-},
+  crowdReact() {
+    crowdSwell(0.55, 0.16, 500, 1500);
+    applauseBurst(7, 0.4, 0.12, 0.05);
+  },
+  cheer(intensity = 1) {
+    const dur = 1.1 + intensity * 0.5;
+    crowdSwell(dur, 0.3 * intensity, 300, 1400);
+    crowdSwell(dur * 0.85, 0.22 * intensity, 500, 2200, 0.05);
+    applauseBurst(Math.round(14 * intensity), dur * 0.9, 0.14, 0.1);
+    const whoops = Math.round(5 + intensity * 4);
+    for (let i = 0; i < whoops; i++) {
+      tone(380 + Math.random() * 500, null, 0.3 + Math.random() * 0.2, 'triangle', 0.09, 0.15 + Math.random() * dur * 0.7);
+    }
+  },
 };
 
 export const Audio = {
   unlock() { ensure(); },
   play(name) {
-    if (!ctx) return; // stays silent until unlock() has been called from a user gesture
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {}); // reactive backstop alongside the visibilitychange listener
+    const activeCtx = ensure();
+    if (!activeCtx) return;
     const fn = SFX[name];
     if (fn) fn();
   }
