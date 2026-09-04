@@ -3,8 +3,8 @@
 // "trauma" screen shake on impacts instead of one-shot offsets.
 import { WORLD_W, GROUND_Y, STAGE_W } from './world.js';
 
-const MIN_VIEW = 340;    // tightest zoom (virtual units visible across the stage width)
-const MAX_VIEW = 640;    // widest zoom
+const MIN_VIEW = 340;     // tightest zoom (virtual units visible across the stage width)
+const MAX_VIEW = 640;     // widest zoom
 const START_VIEW = MAX_VIEW; // view width at the top of a round, before fighters separate
 
 // Smoothing rates are "per-second" exponential decay constants rather than flat
@@ -15,9 +15,9 @@ const PAN_RATE = 10.5;   // higher = snappier horizontal tracking
 const TRAUMA_DECAY = 2.6; // trauma units/sec
 
 const SHAKE_X = 14, SHAKE_Y = 8;
-const PUNCH_ZOOM = 46;          // max transient zoom-in (viewW reduction) from a big hit
-const PUNCH_ZOOM_ATTACK = 30;   // snaps in fast on impact
-const PUNCH_ZOOM_RELEASE = 7;   // eases back out more slowly, riding the shake's decay
+const PUNCH_ZOOM = 46;             // max transient zoom-in (viewW reduction) from a big hit
+const PUNCH_ZOOM_ATTACK = 30;    // snaps in fast on impact
+const PUNCH_ZOOM_RELEASE = 7;    // eases back out more slowly, riding the shake's decay
 
 function smoothing(rate, dt) {
   // Exponential smoothing factor equivalent to the old fixed per-frame lerp, but
@@ -53,7 +53,9 @@ export class Camera {
     this.trauma = Math.min(1, this.trauma + magnitude);
   }
 
-  update(fighterA, fighterB, dt) {
+  update(fighterA, fighterB, dt = 0.016) {
+    if (!fighterA || !fighterB) return;
+
     const midX = (fighterA.x + fighterB.x) / 2;
     const dist = Math.abs(fighterA.x - fighterB.x);
     const targetView = Math.max(MIN_VIEW, Math.min(MAX_VIEW, dist * 1.9 + 220));
