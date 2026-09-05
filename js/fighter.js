@@ -330,54 +330,61 @@ export class Fighter {
     if (t === 'punch' || t === 'rush') this.ikPunch = { start: this.timeSec, dur: (timing.startup + timing.active) * 1.6 };
   }
 
-  resolveAttack(opp) {
-    const t = this.attackType;
-    const timing = ATTACK[t];
-    const dist = Math.abs(this.x - opp.x);
-    const facingOK = (this.x < opp.x && this.facing === 1) || (this.x > opp.x && this.facing === -1);
-    if (dist > timing.range || !facingOK) { this.attackOutcome = 'whiff'; this.pushEvent({ type: 'whoosh' }); return; }
-    if (this.timeSec < opp.invincibleUntil) { this.attackOutcome = 'whiff'; return; }
+resolveAttack(opp) {
+  const t = this.attackType;
+  const timing = ATTACK[t];
+  const dist = Math.abs(this.x - opp.x);
+  const facingOK = (this.x < opp.x && this.facing === 1) || (this.x > opp.x && this.facing === -1);
 
-    this.comboCount = (this.timeSec - this.lastHitTime < COMBO_WINDOW) ? this.comboCount + 1 : 1;
-    this.lastHitTime = this.timeSec;
-
-    let dmg = timing.dmg * (this.ch.stats.dmgAll || 1);
-    if (t === 'punch') dmg *= (this.ch.stats.punchDmg || 1);
-    if (t === 'kick' || t === 'aerialKick') dmg *= (this.ch.stats.kickDmg || 1);
-    dmg += Math.min(this.comboCount - 1, 5) * 1.6;
-
-    if (opp.state === 'block' && t !== 'rush') {
-      this.attackOutcome = 'block';
-      dmg *= 0.22;
-      // BUGFIX: chip damage was computed (dmg *= 0.22) but never subtracted from
-      // opp.health, so blocking was 100% free — no chip damage ever landed.
-      opp.health = Math.max(0, opp.health - dmg);
-      opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 });
-      opp.hitReaction = { tier: 'block', start: this.timeSec };
-      const kb = timing.kb * 0.4;
-      opp.vx += (opp.x >= this.x ? 1 : -1) * kb;
-      this.vx -= (opp.x >= this.x ? 1 : -1) * kb * 0.5;
-    } else {
-      // Rush partially pierces guard (reduced damage, still counts as a hit) instead
-      // of being fully blockable or fully unblockable.
-      if (t === 'rush' && opp.state === 'block') { dmg *= 0.4; opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 }); }
-      this.attackOutcome = 'hit';
-      const kb = timing.kb * (opp.ch.stats.knockback ? 1 / opp.ch.stats.knockback : 1);
-      opp.vx += (opp.x >= this.x ? 1 : -1) * kb;
-      opp.vy += t === 'kick' || t === 'aerialKick' ? 140 : 60;
-      opp.hitstunUntil = this.timeSec + (t === 'rush' ? 0.42 : t === 'punch' ? 0.22 : 0.34);
-      opp.state = 'hitstun';
-      opp.hitReaction = { tier: t, start: this.timeSec };
-      opp.el.classList.add('hitflash');
-      setTimeout(() => opp.el.classList.remove('hitflash'), 220);
-      opp.health = Math.max(0, opp.health - dmg);
-      this.hits++;
-      this.pushEvent({
-        type: 'hit', tier: t, combo: this.comboCount,
-        x: opp.x, y: GROUND_Y - opp.y - 45, dirX: (opp.x >= this.x ? 1 : -1), color: this.ch.color
-      });
-    }
+  if (dist > timing.range || !facingOK) {
+    this.attackOutcome = 'whiff';
+    this.pushEvent({ type: 'whoosh' });
+    return;
   }
+  if (this.timeSec < opp.invincibleUntil) {
+    this.attackOutcome = 'whiff';
+    return;
+  }
+
+  this.comboCount = (this.timeSec - this.lastHitTime < COMBO_WINDOW) ? this.comboCount + 1 : 1;
+  this.lastHitTime = this.timeSec;
+
+  let dmg = timing.dmg * (this.ch.stats.dmgAll || 1);
+  if (t === 'punch') dmg *= (this.ch.stats.punchDmg || 1);
+  if (t === 'kick' || t === 'aerialKick') dmg *= (this.ch.stats.kickDmg || 1);
+  dmg += Math.min(this.comboCount - 1, 5) * 1.6;
+
+  if (opp.state === 'block' && t !== 'rush') {
+    this.attackOutcome = 'block';
+    dmg *= 0.22;
+    opp.health = Math.max(0, opp.health - dmg); // ✅ FIX: chip damage applied
+    opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 });
+    opp.hitReaction = { tier: 'block', start: this.timeSec };
+    const kb = timing.kb * 0.4;
+    opp.vx += (opp.x >= this.x ? 1 : -1) * kb;
+    this.vx -= (opp.x >= this.x ? 1 : -1) * kb * 0.5;
+  } else {
+    if (t === 'rush' && opp.state === 'block') {
+      dmg *= 0.4; // ✅ Rush partially pierces guard
+      opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 });
+    }
+    this.attackOutcome = 'hit';
+    const kb = timing.kb * (opp.ch.stats.knockback ? 1 / opp.ch.stats.knockback : 1);
+    opp.vx += (opp.x >= this.x ? 1 : -1) * kb;
+    opp.vy += t === 'kick' || t === 'aerialKick' ? 140 : 60;
+    opp.hitstunUntil = this.timeSec + (t === 'rush' ? 0.42 : t === 'punch' ? 0.22 : 0.34);
+    opp.state = 'hitstun';
+    opp.hitReaction = { tier: t, start: this.timeSec };
+    opp.el.classList.add('hitflash');
+    setTimeout(() => opp.el.classList.remove('hitflash'), 220);
+    opp.health = Math.max(0, opp.health - dmg);
+    this.hits++;
+    this.pushEvent({
+      type: 'hit', tier: t, combo: this.comboCount,
+      x: opp.x, y: GROUND_Y - opp.y - 45, dirX: (opp.x >= this.x ? 1 : -1), color: this.ch.color
+    });
+  }
+}
 
   updateAttackState(opp) {
     if (this.state !== 'attack') return;
