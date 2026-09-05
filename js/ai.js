@@ -1,8 +1,7 @@
-// js/ai.js — CPU brain. Reads the Fighter public state (x, facing, health, state,
-// attackType/attackPhase, grounded) for both fighters and produces an input-shaped
-// decision object each tick. Difficulty is expressed as concrete numeric behavior
-// differences, not just a damage multiplier: reaction delay, guard reliability,
-// preferred spacing, mistake rate, and how eagerly it chains combos.
+// js/ai.js — CPU brain. Reads Fighter state and produces input decisions.
+// Difficulty tiers define numeric behavior differences: reaction delay, guard reliability,
+// spacing, mistake rate, and combo eagerness.
+
 const TIERS = {
   easy: {
     reactionMs: [420, 620], blockChance: 0.28, punishChance: 0.15,
@@ -30,12 +29,14 @@ export class AI {
     this.holdUntil = 0;
   }
 
-  setDifficulty(difficulty) { this.tier = TIERS[difficulty] || TIERS.medium; }
+  setDifficulty(difficulty) {
+    this.tier = TIERS[difficulty] || TIERS.medium;
+  }
 
   decide(self, opp, now) {
     this.dashDir = 0;
 
-    // Reset all action flags at the start of every tick to prevent sticky inputs
+    // Reset all action flags each tick to prevent sticky inputs
     this.decision.left = false;
     this.decision.right = false;
     this.decision.jump = false;
@@ -43,41 +44,32 @@ export class AI {
     this.decision.kick = false;
     this.decision.block = false;
 
-    // Fast reflex layer: react to the opponent's active attack telegraph on a much
-    // shorter clock than the strategic decision below, gated by blockChance so lower
-    // tiers still get hit clean sometimes instead of turtling perfectly.
-    const oppTelegraphing = opp.state === 'attack' && opp.attackPhase === 'startup';
+    const t = this.tier;
     const dist = Math.abs(self.x - opp.x);
-    
-    // Quick reflex block against active attacks
-    if (oppTelegraphing && dist < 130 && Math.random() < this.tier.blockChance) {
+
+    // Reflex layer: block against telegraphed attacks
+    const oppTelegraphing = opp.state === 'attack' && opp.attackPhase === 'startup';
+    if (oppTelegraphing && dist < 130 && Math.random() < t.blockChance) {
       this.decision.block = true;
     }
-    
+
     // Throttle strategic decisions
     if (now < this.nextDecisionAt) return this.decision;
-
-    const t = this.tier;
     const [rMin, rMax] = t.reactionMs;
-    // reactionMs table is in ms; `now` is in seconds, so convert ms to seconds via / 1000
     this.nextDecisionAt = now + (rMin + Math.random() * (rMax - rMin)) / 1000;
 
     const facing = self.x < opp.x ? 1 : -1;
     const [gMin, gMax] = t.preferredGap;
     const preferredGap = gMin + Math.random() * (gMax - gMin);
 
-    // Mistake roll: occasionally do something suboptimal so lower tiers feel human,
-    // not omniscient.
     const mistake = Math.random() < t.mistakeRate;
-
     const canAct = self.state === 'idle' || self.state === 'walk';
 
     if (self.state === 'hitstun' || self.state === 'knockdown') {
-      // nothing to decide, riding out the reaction
-      return this.decision;
+      return this.decision; // ride out stun
     }
 
-    // Spacing: close the gap or back off toward the preferred distance.
+    // Spacing logic
     if (Math.abs(dist - preferredGap) > 18 && !mistake) {
       const moveIn = dist > preferredGap;
       const dir = moveIn ? facing : -facing;
@@ -88,6 +80,7 @@ export class AI {
       if (Math.random() < 0.5) this.decision.right = true; else this.decision.left = true;
     }
 
+    // Attack choices
     if (canAct && dist <= preferredGap + 25) {
       const roll = Math.random();
       if (roll < t.aggression * 0.5) {
@@ -100,7 +93,7 @@ export class AI {
       }
     }
 
-    // Punish whiffed/recovering attacks harder on higher tiers.
+    // Punish whiffed/recovering attacks
     if (canAct && opp.state === 'attack' && opp.attackPhase === 'recovery' && dist < 100) {
       if (Math.random() < t.punishChance) {
         this.decision.punch = Math.random() < 0.5;
@@ -108,7 +101,7 @@ export class AI {
       }
     }
 
-    // Combo follow-up: if we're mid-combo (opponent recently hit), keep pressing.
+    // Combo follow-up
     if (canAct && self.comboCount > 0 && Math.random() < t.comboChance && dist < preferredGap + 15) {
       this.decision.kick = Math.random() < 0.6;
       this.decision.punch = !this.decision.kick;
