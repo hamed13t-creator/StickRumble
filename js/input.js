@@ -1,18 +1,7 @@
 // js/input.js — single-player control scheme: left/right run, jump, punch, kick,
-// hold block (crouch-block; block+kick = low sweep; block+jump = backflip). Works via
-// keyboard or the on-screen touch cluster. Handles double-tap-direction dash detection
-// here so main.js/fighter.js just read plain booleans + a one-shot dash event queue.
-//
-// v2: buffered attack inputs + drift-proof touch buttons + light haptics.
-// - Buffering: punch/kick/jump presses are stamped the instant the raw event fires
-//   (not on the next game-loop poll), then consumed by edgesFrom() within a short
-//   grace window. This matters because main.js skips polling player input entirely
-//   while hit-stop is active (up to ~320ms on a KO) — without buffering, a quick tap
-//   made during that freeze is pressed AND released before anyone ever checks it, so
-//   the input silently vanishes. Buffering means it still registers the instant the
-//   fighter can act again.
-// - Touch capture: on-screen buttons use setPointerCapture so a thumb drifting off a
-//   small button mid-fight no longer cancels the press (previously pointerleave did).
+// hold block (crouch-block; block+kick = low sweep; block+jump = backflip).
+// Handles double-tap-direction dash detection and buffered inputs.
+
 export const input = { left: false, right: false, jump: false, punch: false, kick: false, block: false };
 
 const DASH_WINDOW = 320;
@@ -31,17 +20,7 @@ function noteDirectionTap(dir) {
 }
 
 // ---- Input buffering for punch/kick/jump ----
-// pressStamp[key] holds the performance.now() of the most recent *unconsumed* press.
-// Stamped at the moment of the raw down-event (so it's captured even on frames the
-// game loop never polls), and cleared to 0 once edgesFrom() consumes it — so one
-// physical press still only ever yields one edge, just a more forgiving one.
-// BUGFIX: this was 150ms, shorter than the ~320ms KO hit-stop freeze the module's own
-// header comment says buffering exists to survive (main.js stops polling input for up
-// to that long). A press stamped near the start of a long freeze expired before
-// edgesFrom() ever got called again, so it was silently dropped — the exact failure the
-// buffering was built to prevent. Matched to DASH_WINDOW (320ms) below, which already
-// reflects the correct figure.
-const INPUT_BUFFER_MS = 320;
+const INPUT_BUFFER_MS = 320; // ✅ FIX: matched to KO hit-stop freeze duration
 const pressStamp = { punch: 0, kick: 0, jump: 0 };
 
 function stampPress(key) {
@@ -60,7 +39,7 @@ function consumeBuffered(key, now) {
 
 function vibrate(ms) {
   if (!navigator.vibrate) return;
-  try { navigator.vibrate(ms); } catch (_) { /* unsupported / blocked, ignore */ }
+  try { navigator.vibrate(ms); } catch (_) { /* ignore unsupported */ }
 }
 
 export function initInput(root) {
@@ -74,15 +53,17 @@ export function initInput(root) {
     'l': 'block', 'L': 'block', 'ArrowDown': 'block', 's': 'block', 'S': 'block'
   };
   const wasDown = { left: false, right: false };
+
   document.addEventListener('keydown', e => {
     const key = downMap[e.key];
     if (!key) return;
     e.preventDefault();
     if ((key === 'left' || key === 'right') && !wasDown[key]) noteDirectionTap(key === 'left' ? -1 : 1);
     if (key === 'left' || key === 'right') wasDown[key] = true;
-    stampPress(key); // no-op unless this is a genuine press->hold transition
+    stampPress(key);
     input[key] = true;
   });
+
   document.addEventListener('keyup', e => {
     const key = downMap[e.key];
     if (!key) return;
@@ -105,7 +86,7 @@ export function initInput(root) {
     el.addEventListener('pointerdown', on);
     el.addEventListener('pointerup', off);
     el.addEventListener('pointercancel', off);
-    el.addEventListener('lostpointercapture', off); // backstop if capture is lost mid-hold
+    el.addEventListener('lostpointercapture', off);
   });
 
   // ---- Touch: action buttons ----
@@ -122,16 +103,11 @@ export function initInput(root) {
     btn.addEventListener('pointerdown', on);
     btn.addEventListener('pointerup', off);
     btn.addEventListener('pointercancel', off);
-    btn.addEventListener('lostpointercapture', off); // fires instead of pointerleave now that
-    // the button holds pointer capture through drift, so this is the real release signal
+    btn.addEventListener('lostpointercapture', off);
   });
 }
 
-// Buffered-edge helper: pass the previous frame's snapshot, get back which of
-// punch/kick/jump/block should fire this frame. punch/kick/jump consume any
-// still-fresh buffered press (see INPUT_BUFFER_MS above) rather than requiring the
-// exact frame the key went down; block stays a plain rising edge since fighter.js
-// reads raw block state continuously anyway.
+// ---- Buffered-edge helper ----
 export function edgesFrom(prev) {
   const now = performance.now();
   const e = {
@@ -140,7 +116,7 @@ export function edgesFrom(prev) {
     jump: consumeBuffered('jump', now),
     block: input.block && !prev.block
   };
-  prev.punch = input.punch; prev.kick = input.kick; prev.jump = input.jump; prev.block = input.block;
+  Object.assign(prev, input); // ✅ cleaner state update
   return e;
 }
 
