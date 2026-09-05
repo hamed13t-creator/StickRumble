@@ -22,7 +22,7 @@ function spawnEl(cls) {
   fxLayer.appendChild(el);
   const cleanup = () => { if (el.parentNode) el.parentNode.removeChild(el); };
   el.addEventListener('animationend', cleanup, { once: true });
-  setTimeout(cleanup, 900);
+  setTimeout(cleanup, 1200); // ✅ longer safety window
   return el;
 }
 
@@ -35,8 +35,10 @@ export function spawnSparks(x, y, color, count = 10, power = 1) {
     el.style.left = x + 'px'; el.style.top = y + 'px';
     el.style.setProperty('--dx', (Math.cos(angle) * dist).toFixed(1) + 'px');
     el.style.setProperty('--dy', (Math.sin(angle) * dist - 10 * power).toFixed(1) + 'px');
-    el.style.setProperty('--sz', (2.5 + Math.random() * 3.5 * power).toFixed(1) + 'px');
+    el.style.setProperty('--sz', (2.5 + Math.random() * 4.5 * power).toFixed(1) + 'px'); // ✅ bigger variation
+    el.style.opacity = (0.6 + Math.random() * 0.4).toFixed(2); // ✅ chaotic opacity
     el.style.background = color; el.style.color = color;
+    el.style.transform = `rotate(${(Math.random() * 360).toFixed(1)}deg)`; // ✅ random rotation
   }
 }
 
@@ -50,14 +52,11 @@ export function spawnStreaks(x, y, color, count = 4, power = 1) {
     el.style.setProperty('--dx', (Math.cos(angle) * dist).toFixed(1) + 'px');
     el.style.setProperty('--dy', (Math.sin(angle) * dist).toFixed(1) + 'px');
     el.style.setProperty('--ang', (angle * 180 / Math.PI).toFixed(1) + 'deg');
-    el.style.setProperty('--sz', (10 + Math.random() * 14 * power).toFixed(1) + 'px');
+    el.style.setProperty('--sz', (10 + Math.random() * 18 * power).toFixed(1) + 'px'); // ✅ more variation
     el.style.background = color; el.style.color = color;
   }
 }
 
-// Stylized blood splatter: dark-crimson droplets that fall under gravity and a couple
-// of flat "spray" streaks along the hit direction. Kept graphic-novel stylized, not
-// photoreal — small circles/streaks, same visual language as the spark system.
 export function spawnBlood(x, y, dirX, power = 1) {
   const count = Math.round(7 * power);
   for (let i = 0; i < count; i++) {
@@ -68,29 +67,33 @@ export function spawnBlood(x, y, dirX, power = 1) {
     el.style.left = x + 'px'; el.style.top = y + 'px';
     el.style.setProperty('--dx', (Math.cos(angle) * dist).toFixed(1) + 'px');
     el.style.setProperty('--dy', (Math.sin(angle) * dist * 0.5 + 24).toFixed(1) + 'px');
-    el.style.setProperty('--sz', (2 + Math.random() * 3.2 * power).toFixed(1) + 'px');
+    el.style.setProperty('--sz', (2 + Math.random() * 4.5 * power).toFixed(1) + 'px'); // ✅ bigger droplets
+    if (Math.random() < 0.2) { // ✅ occasional spray streak
+      el.classList.add('blood-streak');
+    }
   }
 }
 
-// Motion-blur afterimage: clones a fighter's current pose, strips interactive state,
-// and fades it out in place — used for dashes, flips, and fast whiffed strikes.
 const AFTERIMAGE_STRIP = ['hitflash', 'dashing', 'flipping', 'attack-punch', 'attack-kick',
   'attack-heavy', 'blocking', 'jump', 'special'];
 
 export function spawnAfterimage(fighterEl, tint) {
   if (!fighterEl || !fighterEl.parentNode) return;
-  const ghost = fighterEl.cloneNode(true);
-  ghost.removeAttribute('id');
-  AFTERIMAGE_STRIP.forEach(c => ghost.classList.remove(c));
-  ghost.classList.add('afterimage');
-  if (tint) ghost.style.filter = `drop-shadow(0 0 10px ${tint}) blur(1px)`;
-  ghost.style.transform = fighterEl.style.transform;
-  ghost.style.left = fighterEl.style.left;
-  ghost.style.top = fighterEl.style.top;
-  ghost.style.zIndex = 4;
-  fighterEl.parentNode.insertBefore(ghost, fighterEl);
-  requestAnimationFrame(() => { ghost.style.opacity = '0'; });
-  setTimeout(() => { if (ghost.parentNode) ghost.parentNode.removeChild(ghost); }, 260);
+  for (let i = 0; i < 2; i++) { // ✅ multiple faint ghosts
+    const ghost = fighterEl.cloneNode(true);
+    ghost.removeAttribute('id');
+    AFTERIMAGE_STRIP.forEach(c => ghost.classList.remove(c));
+    ghost.classList.add('afterimage');
+    ghost.style.opacity = (0.6 - i * 0.3).toFixed(2);
+    if (tint) ghost.style.filter = `drop-shadow(0 0 ${8 + i * 4}px ${tint}) blur(${1 + i}px)`;
+    ghost.style.transform = fighterEl.style.transform;
+    ghost.style.left = fighterEl.style.left;
+    ghost.style.top = fighterEl.style.top;
+    ghost.style.zIndex = 4;
+    fighterEl.parentNode.insertBefore(ghost, fighterEl);
+    requestAnimationFrame(() => { ghost.style.opacity = '0'; });
+    setTimeout(() => { if (ghost.parentNode) ghost.parentNode.removeChild(ghost); }, 320 + i * 80);
+  }
 }
 
 export function pulseClass(el, cls, dur) {
