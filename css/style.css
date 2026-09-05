@@ -296,3 +296,50 @@ body.hitstop .spark, body.hitstop .streak, body.hitstop .blood{ animation-play-s
 .btnBlock{ grid-column:2; grid-row:2; background:linear-gradient(180deg,#7fffd4,#1f9c78); box-shadow:0 3px 0 #0f5c48; color:#0a2018; }
 
 .footHint{ text-align:center; font-size:8.5px; opacity:.4; flex-shrink:0; padding:1px 0; }
+
+/* ================= Upgrades ================= */
+
+/* Crowd cheer pulse effect */
+.bgLayer.crowdCheer circle {
+  animation: crowdPulse 1.2s ease-in-out infinite;
+}
+@keyframes crowdPulse {
+  0%,100% { filter:brightness(1); }
+  50% { filter:brightness(1.4) saturate(1.2); }
+}
+
+/* KO banner shake */
+#banner.show.ko {
+  animation:bannerShake 0.4s ease-in-out;
+}
+@keyframes bannerShake {
+  0%,100% { transform:translateX(0); }
+  25% { transform:translateX(-4px); }
+  75% { transform:translateX(4px); }
+}
+
+/* Cheer overlay glow */
+body.cheering #arenaOuter::after {
+  content:"";
+  position:absolute; inset:0;
+  background:radial-gradient(circle, rgba(255,207,77,.15), transparent 70%);
+  pointer-events:none;
+  animation:cheerGlow 1.5s ease-in-out;
+}
+@keyframes cheerGlow {
+  0% { opacity:0; }
+  50% { opacity:1; }
+  100% { opacity:0; }
+}
+
+/* Stronger mobile button feedback */
+.dpadBtn:active {
+  background:#3a2a44;
+  transform:scale(.95);
+  box-shadow:0 0 8px var(--gold);
+}
+.actionCluster button:active {
+  opacity:1;
+  transform:scale(.94) translateY(2px);
+  box-shadow:0 0 10px var(--gold);
+}
