@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ring-rumble-v6';
+const CACHE_NAME = 'stick-rumble-v1';
 const ASSETS = [
   './',
   './index.html',
@@ -44,8 +44,11 @@ self.addEventListener('fetch', (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         return response;
       }).catch(() => {
-        // Fallback for offline if resource isn't cached
-        if (event.request.headers.get('accept').includes('text/html')) {
+        // Fallback for offline if resource isn't cached. BUGFIX: Headers.get('accept')
+        // can be null for some request types, and calling .includes() on null used to
+        // throw — right inside the one code path meant to handle failure gracefully.
+        const accept = event.request.headers.get('accept') || '';
+        if (accept.includes('text/html')) {
           return caches.match('./index.html');
         }
       });

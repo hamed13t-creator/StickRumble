@@ -1,6 +1,6 @@
 {
-  "name": "Ring Rumble",
-  "short_name": "RingRumble",
+  "name": "Stick Rumble",
+  "short_name": "StickRumble",
   "description": "2.5D side-scrolling stick-fighter vs CPU",
   "start_url": "./index.html",
   "scope": "./",
