@@ -128,10 +128,14 @@ const SFX = {
 
 export const Audio = {
   unlock() { ensure(); },
-  play(name) {
+  // BUGFIX: this previously dropped every argument after `name`, so
+  // Audio.play('crowdReact', 2) or Audio.play('cheer', 1.6) always ran at a flat
+  // intensity=1 regardless of what was passed — the intensity parameters on
+  // crowdReact/cheer were dead code. Args now forward straight through.
+  play(name, ...args) {
     const activeCtx = ensure();
     if (!activeCtx) return;
     const fn = SFX[name];
-    if (fn) fn();
+    if (fn) fn(...args);
   }
 };

@@ -1,6 +1,12 @@
-// js/input.js — single-player control scheme: left/right run, jump, punch, kick,
-// hold block (crouch-block; block+kick = low sweep; block+jump = backflip).
+// js/input.js — single-player control scheme: virtual joystick (left/right run) + hold
+// guard (block; block+kick = low sweep; block+jump = backflip).
 // Handles double-tap-direction dash detection and buffered inputs.
+//
+// The joystick is HORIZONTAL-ONLY in effect — this game has no vertical ground
+// movement, so vertical drag is purely visual feedback for the knob and never reaches
+// `input`. Output is still the same binary input.left/input.right the rest of the
+// codebase (fighter.js, ai.js) expects — no analog walk/run speed. Adding that would be
+// a fighter.js physics change (scaling targetVx by deflection), not an input.js one.
 
 export const input = { left: false, right: false, jump: false, punch: false, kick: false, block: false };
 
@@ -20,7 +26,7 @@ function noteDirectionTap(dir) {
 }
 
 // ---- Input buffering for punch/kick/jump ----
-const INPUT_BUFFER_MS = 320; // ✅ FIX: matched to KO hit-stop freeze duration
+const INPUT_BUFFER_MS = 320; // matched to KO hit-stop freeze duration
 const pressStamp = { punch: 0, kick: 0, jump: 0 };
 
 function stampPress(key) {
@@ -40,6 +46,68 @@ function consumeBuffered(key, now) {
 function vibrate(ms) {
   if (!navigator.vibrate) return;
   try { navigator.vibrate(ms); } catch (_) { /* ignore unsupported */ }
+}
+
+// ---- Virtual joystick ----
+// JOY_MAX_R: how far (px) the knob can travel from center before clamping.
+// JOY_DEADZONE: fraction of JOY_MAX_R the thumb must cross before left/right registers,
+// so accidental drift near center doesn't trigger movement.
+const JOY_MAX_R = 38;
+const JOY_DEADZONE = 0.28;
+
+let joyDir = null; // null | -1 | 1 — current registered direction
+
+function setJoyDirection(dir) {
+  if (dir === joyDir) return;
+  if (dir !== null) noteDirectionTap(dir); // same "fresh press" rule keyboard used, so double-flick still dashes
+  input.left = dir === -1;
+  input.right = dir === 1;
+  joyDir = dir;
+}
+
+function initJoystick(root) {
+  const wrap = root.querySelector('#joystickWrap');
+  const knob = root.querySelector('#joystickKnob');
+  if (!wrap || !knob) return;
+
+  let originX = 0, originY = 0, active = false;
+  const resetKnob = () => { knob.style.transform = 'translate(-50%,-50%)'; };
+
+  const onMove = e => {
+    if (!active) return;
+    e.preventDefault();
+    let dx = e.clientX - originX, dy = e.clientY - originY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > JOY_MAX_R) { const s = JOY_MAX_R / dist; dx *= s; dy *= s; }
+    // Knob follows the full 2D drag visually...
+    knob.style.transform = `translate(calc(-50% + ${dx.toFixed(1)}px),calc(-50% + ${dy.toFixed(1)}px))`;
+    // ...but only horizontal deflection past the deadzone drives actual game input.
+    const deadR = JOY_MAX_R * JOY_DEADZONE;
+    if (dx <= -deadR) setJoyDirection(-1);
+    else if (dx >= deadR) setJoyDirection(1);
+    else setJoyDirection(null);
+  };
+
+  wrap.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    try { wrap.setPointerCapture(e.pointerId); } catch (_) {}
+    const rect = wrap.getBoundingClientRect();
+    originX = rect.left + rect.width / 2;
+    originY = rect.top + rect.height / 2;
+    active = true;
+    wrap.classList.add('active');
+    onMove(e);
+  });
+  const release = () => {
+    active = false;
+    wrap.classList.remove('active');
+    resetKnob();
+    setJoyDirection(null);
+  };
+  wrap.addEventListener('pointermove', onMove);
+  wrap.addEventListener('pointerup', release);
+  wrap.addEventListener('pointercancel', release);
+  wrap.addEventListener('lostpointercapture', release);
 }
 
 export function initInput(root) {
@@ -71,25 +139,19 @@ export function initInput(root) {
     if (key === 'left' || key === 'right') wasDown[key] = false;
   });
 
-  // ---- Touch: directional pad ----
-  const dpadLeft = root.querySelector('[data-ctrl="left"]');
-  const dpadRight = root.querySelector('[data-ctrl="right"]');
-  [[dpadLeft, 'left', -1], [dpadRight, 'right', 1]].forEach(([el, key, dir]) => {
-    if (!el) return;
-    const on = e => {
-      e.preventDefault();
-      try { el.setPointerCapture(e.pointerId); } catch (_) {}
-      if (!input[key]) noteDirectionTap(dir);
-      input[key] = true;
-    };
-    const off = e => { e.preventDefault(); input[key] = false; };
-    el.addEventListener('pointerdown', on);
-    el.addEventListener('pointerup', off);
-    el.addEventListener('pointercancel', off);
-    el.addEventListener('lostpointercapture', off);
+  // Losing window focus mid-hold (alt-tab, opening devtools) previously left keys
+  // stuck "down" forever since no keyup ever fires — main.js auto-pauses on
+  // visibilitychange, but this clears the raw state too so nothing is stuck once resumed.
+  window.addEventListener('blur', () => {
+    input.left = input.right = input.jump = input.punch = input.kick = input.block = false;
+    wasDown.left = wasDown.right = false;
+    joyDir = null;
   });
 
-  // ---- Touch: action buttons ----
+  // ---- Touch/mouse: virtual joystick ----
+  initJoystick(root);
+
+  // ---- Touch/mouse: action buttons ----
   root.querySelectorAll('[data-key]').forEach(btn => {
     const key = btn.dataset.key;
     const on = e => {
@@ -116,7 +178,7 @@ export function edgesFrom(prev) {
     jump: consumeBuffered('jump', now),
     block: input.block && !prev.block
   };
-  Object.assign(prev, input); // ✅ cleaner state update
+  Object.assign(prev, input);
   return e;
 }
 

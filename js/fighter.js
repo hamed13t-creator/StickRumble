@@ -328,6 +328,10 @@ export class Fighter {
     this._atkTimer = setTimeout(() => this.el.classList.remove(...allAtkClasses), animMs);
 
     if (t === 'punch' || t === 'rush') this.ikPunch = { start: this.timeSec, dur: (timing.startup + timing.active) * 1.6 };
+
+    // Motion-blur trail on the two fastest, IK-driven strikes only. Kick/lowkick are
+    // CSS-keyframe driven and slower, and already read well without one.
+    if (t === 'punch' || t === 'rush') this.pushEvent({ type: 'trail', color: this.ch.color });
   }
 
   resolveAttack(opp) {
