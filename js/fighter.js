@@ -302,6 +302,7 @@ export class Fighter {
     // re-arming, but reset() (called every round transition on the same instance) never
     // did — a leftover timer from the moment just before a round-ending KO could still
     // fire against next round's fresh attack-class state.
+    clearTimeout(this._hitflashTimer);
     this.x = x; this.y = 0; this.vx = 0; this.vy = 0;
     this.health = this.maxHealth; this.state = 'idle'; this.grounded = true;
     this.attackType = null; this.attackPhase = null; this.comboCount = 0; this.comboBuffer = []; this.hits = 0;
@@ -386,7 +387,7 @@ export class Fighter {
     if (t === 'kick' || t === 'aerialKick') dmg *= (this.ch.stats.kickDmg || 1);
     dmg += Math.min(this.comboCount - 1, 5) * 1.6;
 
-    if (opp.state === 'block' && t !== 'rush') {
+    if ((opp.state === 'block' || opp.state === 'aerialGuard') && t !== 'rush') {
       this.attackOutcome = 'block';
       dmg *= 0.22;
       opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 });
@@ -397,7 +398,7 @@ export class Fighter {
     } else {
       // Rush partially pierces guard (reduced damage, still counts as a hit) instead
       // of being fully blockable or fully unblockable.
-      if (t === 'rush' && opp.state === 'block') { dmg *= 0.4; opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 }); }
+      if (t === 'rush' && (opp.state === 'block' || opp.state === 'aerialGuard')) { dmg *= 0.4; opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 }); }
       this.attackOutcome = 'hit';
       const kb = timing.kb * (opp.ch.stats.knockback ? 1 / opp.ch.stats.knockback : 1);
       opp.vx += (opp.x >= this.x ? 1 : -1) * kb;
@@ -405,8 +406,16 @@ export class Fighter {
       opp.hitstunUntil = this.timeSec + (t === 'rush' ? 0.42 : t === 'punch' ? 0.22 : 0.34);
       opp.state = 'hitstun';
       opp.hitReaction = { tier: t, start: this.timeSec };
+      // BUGFIX: rapid pre-hit button presses (an in-progress combo attempt, or a
+      // just-queued bufferedAttack) used to survive across the hit and could fire an
+      // unintended attack/Rush the instant hitstun cleared. Getting hit now clears both.
+      opp.comboBuffer.length = 0;
+      opp.bufferedAttack = null;
       opp.el.classList.add('hitflash');
-      setTimeout(() => opp.el.classList.remove('hitflash'), 220);
+      clearTimeout(opp._hitflashTimer); // OPTIMIZATION: was an untracked anonymous
+      // timeout — repeated hits within 220ms (any rush/combo chain) stacked multiple
+      // overlapping timers instead of one tracked, replaceable one.
+      opp._hitflashTimer = setTimeout(() => opp.el && opp.el.classList.remove('hitflash'), 220);
       opp.health = Math.max(0, opp.health - dmg);
       this.hits++;
       this.pushEvent({
@@ -488,8 +497,15 @@ export class Fighter {
     this.events = [];
     const now = this.timeSec;
 
-    // Facing always toward opponent unless mid-attack/flip (keeps strikes readable).
-    if (this.state !== 'attack' && this.state !== 'flip') this.facing = this.x <= opp.x ? 1 : -1;
+    // Facing always toward opponent unless mid-attack/flip/hitstun (keeps strikes
+    // readable and stops the rapid left-right facing flicker that rapid-fire trades
+    // could cause when knockback pushes a stunned fighter past the opponent's x — a
+    // 2px deadzone additionally prevents flip-flopping when both fighters are almost
+    // exactly overlapped at point-blank range).
+    if (this.state !== 'attack' && this.state !== 'flip' && this.state !== 'hitstun') {
+      const dx = opp.x - this.x;
+      if (Math.abs(dx) > 2) this.facing = dx >= 0 ? 1 : -1;
+    }
 
     // ---- Knockdown / hitstun timers ----
     if (this.state === 'hitstun' && now >= this.hitstunUntil) {
@@ -510,21 +526,35 @@ export class Fighter {
       }
     }
 
+    // ---- Aerial guard ("push guard"): holding Kick while airborne from a jump drops
+    // into a defensive stance — incoming hits are mitigated the same way a ground block
+    // is (see resolveAttack). A quick tap-and-release still throws the existing aerial
+    // kick attack via the kickEdge branch below; only a sustained hold, once the
+    // fighter is back to a plain airborne 'jump' state, engages the guard.
+    if (!this.grounded && (this.state === 'jump' || this.state === 'aerialGuard')) {
+      this.state = inp.kickHeld ? 'aerialGuard' : (this.state === 'aerialGuard' ? 'jump' : this.state);
+    }
+
     // ---- Block (grounded only; covers entering AND releasing block) ----
     const dashing = now < this._dashUntil;
     if (this.grounded && (this.state === 'idle' || this.state === 'walk' || this.state === 'block')) {
       this.state = inp.block ? 'block' : (Math.abs(this.vx) > 12 ? 'walk' : 'idle');
     }
-    this.el.classList.toggle('blocking', this.state === 'block');
+    this.el.classList.toggle('blocking', this.state === 'block' || this.state === 'aerialGuard');
 
-    // ---- Attack input (edge-triggered, with buffering during recovery) ----
+    // ---- Attack input (edge-triggered, with buffering during any active attack) ----
+    // BUGFIX: previously only a press landing during 'recovery' got queued into
+    // bufferedAttack — a press during 'startup'/'active' (including the very common
+    // case of mashing punch and kick on the same frame, where the punch branch below
+    // has already flipped state to 'attack' by the time the kick branch runs) was
+    // silently dropped instead of queued, making rapid mashing feel unresponsive.
     if (inp.punchEdge && this.state !== 'block') {
       if (this.canAct()) this.startAttack('punch', false);
-      else if (this.state === 'attack' && this.attackPhase === 'recovery') this.bufferedAttack = 'punch';
+      else if (this.state === 'attack' && !this.bufferedAttack) this.bufferedAttack = 'punch';
     }
     if (inp.kickEdge) {
       if (this.canAct() || this.state === 'block') this.startAttack('kick', false);
-      else if (this.state === 'attack' && this.attackPhase === 'recovery') this.bufferedAttack = 'kick';
+      else if (this.state === 'attack' && !this.bufferedAttack) this.bufferedAttack = 'kick';
     }
 
     // ---- Combo buffer -> Rush special (punch, punch, kick) ----
@@ -571,7 +601,7 @@ export class Fighter {
         this.y = 0; this.vy = 0;
         if (!this.grounded) this.pushEvent({ type: 'land', x: this.x, y: GROUND_Y });
         this.grounded = true;
-        if (this.state === 'jump') this.state = 'idle';
+        if (this.state === 'jump' || this.state === 'aerialGuard') this.state = 'idle';
         if (this.state === 'flip') {
           this.state = 'landing';
           this.landingUntil = now + LANDING_RECOVERY;

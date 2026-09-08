@@ -4,7 +4,7 @@ import { Fighter, CHARACTERS, rigSVG } from './fighter.js';
 import { Camera } from './camera.js';
 import { ParallaxBackground } from './background.js';
 import { AI } from './ai.js';
-import { input, initInput, edgesFrom, consumeDash } from './input.js';
+import { input, initInput, edgesFrom, consumeDash, consumeFlip } from './input.js';
 import { Audio } from './audio.js';
 import * as FX from './effects.js';
 import { STAGE_W, STAGE_H, WORLD_W } from './world.js';
@@ -74,6 +74,22 @@ function fitStage() {
 }
 new ResizeObserver(fitStage).observe(arenaOuter);
 window.addEventListener('resize', fitStage);
+
+// ---------------- Orientation: landscape only during the fight, free elsewhere ----------------
+// manifest.json no longer declares a blanket "orientation": "landscape" — that forced
+// rotation even on the portrait-friendly select screen for anyone who'd installed the
+// PWA. Landscape is requested only once a match actually starts, and released back to
+// the device's natural orientation on return to select. Best-effort: the Orientation
+// Lock API isn't available on every browser (notably iOS Safari), so every call is
+// feature-detected and its promise/exception is swallowed.
+function lockLandscape() {
+  const so = screen.orientation;
+  if (so && so.lock) so.lock('landscape').catch(() => {});
+}
+function unlockOrientation() {
+  const so = screen.orientation;
+  if (so && so.unlock) { try { so.unlock(); } catch (_) {} }
+}
 
 // ---------------- Core game objects ----------------
 initInput(controlsRoot);
@@ -348,6 +364,7 @@ function exitToSelect() {
   gameScreen.style.display = 'none';
   selectScreen.style.display = 'flex';
   clearWorld();
+  unlockOrientation();
 }
 
 pauseBtn.addEventListener('click', pauseGame);
@@ -372,6 +389,7 @@ document.addEventListener('visibilitychange', () => {
 // ---------------- Fight! ----------------
 fightBtn.addEventListener('click', () => {
   Audio.unlock(); // guaranteed real user gesture — reliable place to init the AudioContext
+  lockLandscape();
   const others = CHARACTERS.filter(c => c.key !== pickedKey);
   const cpuKey = (others.length ? others[Math.floor(Math.random() * others.length)] : CHARACTERS[0]).key;
   selectScreen.style.display = 'none';
@@ -382,7 +400,7 @@ fightBtn.addEventListener('click', () => {
 
 // ---------------- Main loop ----------------
 function toFighterInput(cur, edges) {
-  return { left: cur.left, right: cur.right, block: cur.block, jumpEdge: edges.jump, punchEdge: edges.punch, kickEdge: edges.kick };
+  return { left: cur.left, right: cur.right, block: cur.block, kickHeld: cur.kick, jumpEdge: edges.jump, punchEdge: edges.punch, kickEdge: edges.kick };
 }
 function computeEdges(cur, prev) {
   const e = { jump: cur.jump && !prev.jump, punch: cur.punch && !prev.punch, kick: cur.kick && !prev.kick };
@@ -412,6 +430,11 @@ function loop(ts) {
     // into velocity as `this.dashDir * DASH_SPEED`) — passing the wrapped object through
     // would have made every dash resolve to NaN velocity the first time it was thrown.
     const playerDash = dashEv ? dashEv.dir : 0;
+    // Joystick Up-Up (within input.js's double-tap window) triggers a front flip
+    // directly instead of routing through a second jump edge — see setJoyVert() in
+    // input.js. startFlip() already no-ops if the fighter can't act (mid-attack/hitstun).
+    const flipEv = consumeFlip();
+    if (flipEv) p1.startFlip(flipEv.kind);
 
     // ---- CPU ----
     const aiDecision = ai.decide(p2, p1, match.clock);

@@ -10,6 +10,15 @@
 
 export const input = { left: false, right: false, jump: false, punch: false, kick: false, block: false };
 
+// Block can now be held from three independent sources (keyboard, the on-screen GUARD
+// button, and the joystick pulled down for the new crouch/guard command) — tracked
+// separately and OR'd into input.block so releasing one source doesn't clear a hold
+// another source still has active.
+const blockSources = { key: false, button: false, joyDown: false };
+function updateBlock() {
+  input.block = blockSources.key || blockSources.button || blockSources.joyDown;
+}
+
 const DASH_WINDOW = 320;
 let lastTapDir = null;
 let lastTapTime = 0;
@@ -24,6 +33,13 @@ function noteDirectionTap(dir) {
     lastTapDir = dir; lastTapTime = now;
   }
 }
+
+// ---- Joystick Up / Down commands: Up = Jump, a second Up within FLIP_DOUBLE_WINDOW =
+// Front Flip (mirrors the horizontal double-tap-to-dash pattern above), Down = hold
+// Block/Crouch (feeds the same blockSources.joyDown slot as any other block source). ----
+const FLIP_DOUBLE_WINDOW = 250;
+let lastUpTapTime = 0;
+export const flipEvents = []; // { kind: 'front' } pushed on a qualifying Up-Up; consumed by main.js each frame
 
 // ---- Input buffering for punch/kick/jump ----
 const INPUT_BUFFER_MS = 320; // matched to KO hit-stop freeze duration
@@ -54,8 +70,13 @@ function vibrate(ms) {
 // so accidental drift near center doesn't trigger movement.
 const JOY_MAX_R = 38;
 const JOY_DEADZONE = 0.28;
+// Vertical deadzones for the new Up (Jump / double-tap Front Flip) and Down (Block/
+// Crouch) commands — the joystick was previously horizontal-only.
+const JOY_UP_DEADZONE = 0.32;
+const JOY_DOWN_DEADZONE = 0.32;
 
-let joyDir = null; // null | -1 | 1 — current registered direction
+let joyDir = null; // null | -1 | 1 — current registered horizontal direction
+let joyVert = null; // null | 'up' | 'down' — current registered vertical direction
 
 function setJoyDirection(dir) {
   if (dir === joyDir) return;
@@ -63,6 +84,31 @@ function setJoyDirection(dir) {
   input.left = dir === -1;
   input.right = dir === 1;
   joyDir = dir;
+}
+
+function setJoyVert(dir) {
+  if (dir === joyVert) return;
+  if (dir === 'up') {
+    const now = performance.now();
+    if (now - lastUpTapTime < FLIP_DOUBLE_WINDOW) {
+      // Second Up within the window: a flip supersedes a plain jump, so this
+      // deliberately does NOT also stamp a jump edge (avoids double-triggering both
+      // this direct flip and the existing "second jump while airborne = flip" path).
+      flipEvents.push({ kind: 'front' });
+      lastUpTapTime = 0;
+    } else {
+      stampPress('jump'); input.jump = true; // first Up behaves like the Jump button
+      lastUpTapTime = now;
+    }
+  } else if (joyVert === 'up') {
+    input.jump = false;
+  }
+  if (dir === 'down') {
+    blockSources.joyDown = true; updateBlock();
+  } else if (joyVert === 'down') {
+    blockSources.joyDown = false; updateBlock();
+  }
+  joyVert = dir;
 }
 
 function initJoystick(root) {
@@ -81,11 +127,18 @@ function initJoystick(root) {
     if (dist > JOY_MAX_R) { const s = JOY_MAX_R / dist; dx *= s; dy *= s; }
     // Knob follows the full 2D drag visually...
     knob.style.transform = `translate(calc(-50% + ${dx.toFixed(1)}px),calc(-50% + ${dy.toFixed(1)}px))`;
-    // ...but only horizontal deflection past the deadzone drives actual game input.
+    // ...horizontal deflection past its deadzone drives left/right + dash, vertical
+    // deflection past its own deadzone drives Jump/Flip (up) and Block/Crouch (down).
     const deadR = JOY_MAX_R * JOY_DEADZONE;
     if (dx <= -deadR) setJoyDirection(-1);
     else if (dx >= deadR) setJoyDirection(1);
     else setJoyDirection(null);
+
+    const upDeadR = JOY_MAX_R * JOY_UP_DEADZONE;
+    const downDeadR = JOY_MAX_R * JOY_DOWN_DEADZONE;
+    if (dy <= -upDeadR) setJoyVert('up');
+    else if (dy >= downDeadR) setJoyVert('down');
+    else setJoyVert(null);
   };
 
   wrap.addEventListener('pointerdown', e => {
@@ -103,6 +156,7 @@ function initJoystick(root) {
     wrap.classList.remove('active');
     resetKnob();
     setJoyDirection(null);
+    setJoyVert(null);
   };
   wrap.addEventListener('pointermove', onMove);
   wrap.addEventListener('pointerup', release);
@@ -129,6 +183,7 @@ export function initInput(root) {
     e.preventDefault();
     if ((key === 'left' || key === 'right') && !wasDown[key]) noteDirectionTap(key === 'left' ? -1 : 1);
     if (key === 'left' || key === 'right') wasDown[key] = true;
+    if (key === 'block') { blockSources.key = true; updateBlock(); return; }
     stampPress(key);
     input[key] = true;
   });
@@ -136,6 +191,7 @@ export function initInput(root) {
   document.addEventListener('keyup', e => {
     const key = downMap[e.key];
     if (!key) return;
+    if (key === 'block') { blockSources.key = false; updateBlock(); return; }
     input[key] = false;
     if (key === 'left' || key === 'right') wasDown[key] = false;
   });
@@ -146,7 +202,8 @@ export function initInput(root) {
   window.addEventListener('blur', () => {
     input.left = input.right = input.jump = input.punch = input.kick = input.block = false;
     wasDown.left = wasDown.right = false;
-    joyDir = null;
+    joyDir = null; joyVert = null;
+    blockSources.key = blockSources.button = blockSources.joyDown = false;
   });
 
   // ---- Touch/mouse: virtual joystick ----
@@ -158,11 +215,15 @@ export function initInput(root) {
     const on = e => {
       e.preventDefault();
       try { btn.setPointerCapture(e.pointerId); } catch (_) {}
-      stampPress(key);
-      input[key] = true;
+      if (key === 'block') { blockSources.button = true; updateBlock(); }
+      else { stampPress(key); input[key] = true; }
       vibrate(key === 'punch' || key === 'kick' ? 12 : 8);
     };
-    const off = e => { e.preventDefault(); input[key] = false; };
+    const off = e => {
+      e.preventDefault();
+      if (key === 'block') { blockSources.button = false; updateBlock(); }
+      else input[key] = false;
+    };
     btn.addEventListener('pointerdown', on);
     btn.addEventListener('pointerup', off);
     btn.addEventListener('pointercancel', off);
@@ -185,4 +246,8 @@ export function edgesFrom(prev) {
 
 export function consumeDash() {
   return dashEvents.shift() || null;
+}
+
+export function consumeFlip() {
+  return flipEvents.shift() || null;
 }

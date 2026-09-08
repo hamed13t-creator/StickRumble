@@ -40,8 +40,15 @@ function armOrFlag(rand, r) {
 }
 
 // ---- Chaotic crowd row builder ----
+// `arch` bows the row into a shallow parabola — highest at row-center, tapering to 0 at
+// the row's outer edges — instead of a flat horizontal line. Layering several rows with
+// increasing arch (see _build()) approximates concentric stadium tiers curving up and
+// around the ring, within this game's flat side-scrolling parallax-layer architecture
+// (true 360° wrap-around would need a 3D/perspective renderer, out of scope for the
+// pure-SVG constraint this project is built on).
 function buildCrowdRow(rand, w, y, spacing, r, opts = {}) {
   const armChance = opts.armChance ?? 0;
+  const arch = opts.arch ?? 0;
   let x = -spacing * 0.5 + rand() * spacing;
   let out = '';
   while (x < w + spacing) {
@@ -51,8 +58,11 @@ function buildCrowdRow(rand, w, y, spacing, r, opts = {}) {
     const delay = (rand() * 4).toFixed(2);
     const yOffset = (rand() * 6 - 3).toFixed(1);   // vertical shuffle
     const xOffset = (rand() * 8 - 4).toFixed(1);   // horizontal shuffle
+    const nx = Math.max(0, Math.min(1, x / w));      // normalized position across the row
+    const bulge = arch ? arch * (1 - Math.pow(nx * 2 - 1, 2)) : 0; // parabolic stadium bow
+    const rowY = y - bulge;
 
-    out += `<g transform="translate(${(x + parseFloat(xOffset)).toFixed(1)},${(y + parseFloat(yOffset)).toFixed(1)})">` +
+    out += `<g transform="translate(${(x + parseFloat(xOffset)).toFixed(1)},${(rowY + parseFloat(yOffset)).toFixed(1)})">` +
       `<animateTransform attributeName="transform" type="translate" additive="sum" values="0,0;0,${-bob};0,0" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` +
       `<circle class="crowdDot" r="${r}" fill="${color}"/>` +
       `<circle class="crowdDot" cy="${(-r * 0.9).toFixed(1)}" r="${(r * 0.55).toFixed(1)}" fill="#e8c39e" opacity=".9"/>` +
@@ -218,7 +228,7 @@ export class ParallaxBackground {
     let farHtml = buildTierBackdrop(far.width, farBaseY, 6, 20, '#241a30', '#2c2038');
     farHtml += buildMarquee(far.width, farBaseY - 6 * 20 - 14);
     for (let row = 0; row < 6; row++) {
-      farHtml += buildCrowdRow(rFar, far.width, farBaseY - row * 20 - 10, 15, 3.6, { armChance: 0.08 });
+      farHtml += buildCrowdRow(rFar, far.width, farBaseY - row * 20 - 10, 15, 3.6, { armChance: 0.08, arch: 10 + row * 4 });
     }
     far.el.innerHTML = farHtml;
     this.layers.push(far);
@@ -229,9 +239,9 @@ export class ParallaxBackground {
     const midBaseY = STAGE_H * 0.98;
     let midHtml = buildTierBackdrop(mid.width, midBaseY, 5, 28, '#2c2038', '#352842');
     for (let row = 0; row < 5; row++) {
-      midHtml += buildCrowdRow(rMid, mid.width, midBaseY - row * 28 - 14, 20, 5.2, { armChance: 0.18 });
+      midHtml += buildCrowdRow(rMid, mid.width, midBaseY - row * 28 - 14, 20, 5.2, { armChance: 0.18, arch: 14 + row * 6 });
     }
-    midHtml += buildFlashes(mid.width, 10, seeded(61), midBaseY - 5 * 28, midBaseY);
+    midHtml += buildFlashes(mid.width, 10, seeded(61), midBaseY - 5 * 28 - 40, midBaseY);
     midHtml += buildAdBanner(mid.width, midBaseY - 14, 14, seeded(53)); // frontmost, drawn last so it sits in front of the crowd
     mid.el.innerHTML = midHtml;
     this.layers.push(mid);
