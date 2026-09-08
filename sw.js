@@ -1,4 +1,5 @@
-const CACHE_NAME = 'stick-rumble-v1';
+const CACHE_VERSION = 'v2'; // bump this on every asset-affecting deploy to bust old caches
+const CACHE_NAME = `stick-rumble-${CACHE_VERSION}`;
 const ASSETS = [
   './',
   './index.html',
@@ -19,8 +20,18 @@ const ASSETS = [
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
+  // BUGFIX: cache.addAll() is atomic — a single missing asset (e.g. an icon that
+  // never got generated) rejected the whole promise and silently killed SW install,
+  // not just the icon. Each asset is now cached independently so one 404 can't take
+  // the rest down with it.
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(
+        ASSETS.map((asset) =>
+          cache.add(asset).catch((err) => console.warn('[sw] failed to cache', asset, err))
+        )
+      )
+    )
   );
 });
 
