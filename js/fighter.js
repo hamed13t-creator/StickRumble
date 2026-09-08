@@ -174,6 +174,26 @@ export function rigSVG(ch) {
   </svg>`;
 }
 
+// ---------------- Render helpers: epsilon-gated style writes ----------------
+// _render() writes .style.transform to 8+ sub-elements per fighter, every frame, for
+// both fighters. Most of those writes (idle sway, tiny IK drift) change by well under a
+// degree frame-to-frame — still a template-literal string allocation + style
+// recalculation each time. These helpers skip the write when the change is
+// imperceptible, cutting GC churn substantially on the mobile devices this targets.
+const ROT_EPS = 0.05; // degrees
+function setRot(el, deg, precision = 1) {
+  if (!el) return;
+  if (el._prevRot !== undefined && Math.abs(deg - el._prevRot) < ROT_EPS) return;
+  el._prevRot = deg;
+  el.style.transform = deg === 0 ? '' : `rotate(${deg.toFixed(precision)}deg)`;
+}
+function clearRot(el) {
+  if (!el) return;
+  if (el._prevRot === 0) return;
+  el._prevRot = 0;
+  el.style.transform = '';
+}
+
 // ---------------- Compact 2-bone IK (punch arm) ----------------
 class TwoBoneIK {
   constructor(len1, len2, maxStretch = 1.15) { this.len1 = len1; this.len2 = len2; this.maxStretch = maxStretch; }
@@ -248,6 +268,7 @@ export class Fighter {
     this.walkPhase = 0;
     this.ikPunch = null;
     this.hitReaction = null; // { tier, start } — decaying recoil impulse from being hit/blocking
+    this.pendingResolve = false; // set when this frame's startup->active transition needs resolveAttack()
     this._idleSeed = Math.random() * 1000;
     this._nextShiftAt = 2 + Math.random() * 3;
     this._shiftPulseStart = undefined;
@@ -277,17 +298,24 @@ export class Fighter {
   }
 
   reset(x) {
+    clearTimeout(this._atkTimer); // OPTIMIZATION: startAttack() already clears this before
+    // re-arming, but reset() (called every round transition on the same instance) never
+    // did — a leftover timer from the moment just before a round-ending KO could still
+    // fire against next round's fresh attack-class state.
     this.x = x; this.y = 0; this.vx = 0; this.vy = 0;
     this.health = this.maxHealth; this.state = 'idle'; this.grounded = true;
     this.attackType = null; this.attackPhase = null; this.comboCount = 0; this.comboBuffer = []; this.hits = 0;
     this.hitstunUntil = 0; this.knockdownUntil = 0; this.invincibleUntil = 0; this.dashCooldownUntil = 0;
     this._dashUntil = 0; this.flipUntil = 0; this._flipStart = 0; this.landingUntil = 0; this.walkPhase = 0;
-    this.ikPunch = null; this.hitReaction = null; this.events = [];
+    this.ikPunch = null; this.hitReaction = null; this.pendingResolve = false; this.events = [];
     this._nextShiftAt = this.timeSec + 2 + Math.random() * 3;
     this._shiftPulseStart = undefined;
     if (this.rig.flipSpin) this.rig.flipSpin.style.animation = 'none';
     ['armFU', 'armFL', 'armBU', 'armBL', 'legFU', 'legFL', 'legBU', 'legBL', 'rigWrap'].forEach(k => {
-      if (this.rig[k]) this.rig[k].style.transform = '';
+      const node = this.rig[k];
+      if (!node) return;
+      node.style.transform = '';
+      node._prevRot = 0; node._prevSx = undefined; node._prevSy = undefined;
     });
     this.el.classList.remove('hitflash', 'dashing', 'flipping', 'blocking', 'attack-punch', 'attack-kick',
       'attack-heavy', 'attack-lowkick', 'aerial', 'jump', 'ko');
@@ -332,6 +360,14 @@ export class Fighter {
     // Motion-blur trail on the two fastest, IK-driven strikes only. Kick/lowkick are
     // CSS-keyframe driven and slower, and already read well without one.
     if (t === 'punch' || t === 'rush') this.pushEvent({ type: 'trail', color: this.ch.color });
+  }
+
+  // Called by main.js after BOTH fighters' update() has run for the frame — see the
+  // pendingResolve comment in updateAttackState() for why this is deferred.
+  resolvePending(opp) {
+    if (!this.pendingResolve) return;
+    this.pendingResolve = false;
+    this.resolveAttack(opp);
   }
 
   resolveAttack(opp) {
@@ -387,7 +423,14 @@ export class Fighter {
       if (this.timeSec - el >= this.attackDurations.startup) {
         this.attackPhase = 'active';
         this.attackPhaseStart = this.timeSec;
-        this.resolveAttack(opp);
+        // BUGFIX: resolution used to happen immediately here, inside update(). Since
+        // main.js calls p1.update() before p2.update(), a same-frame trade meant p1's
+        // resolveAttack() could mutate p2.state to 'hitstun' before p2's own
+        // updateAttackState() ran — which then early-returns (state !== 'attack') and
+        // permanently drops p2's hit. Flagging it here and resolving from main.js via
+        // resolvePending(), after both fighters have advanced their own phase for the
+        // frame, makes trades symmetric.
+        this.pendingResolve = true;
       }
       return;
     }
@@ -614,7 +657,7 @@ export class Fighter {
     const curLean = parseFloat(r.lean.dataset.lean || '0');
     const nextLean = curLean + (lean - curLean) * Math.min(1, dt * 14);
     r.lean.dataset.lean = nextLean;
-    r.lean.style.transform = `rotate(${nextLean.toFixed(2)}deg)`;
+    setRot(r.lean, nextLean, 2);
 
     // ---- Landing squash / impact recoil — rigWrap is otherwise untouched by CSS or JS. ----
     let sx = 1, sy = 1;
@@ -623,7 +666,11 @@ export class Fighter {
       const wob = Math.sin(p * Math.PI) * (pose.weight || 1);
       sx = 1 + wob * 0.16; sy = 1 - wob * 0.14;
     }
-    r.rigWrap.style.transform = (sx === 1 && sy === 1) ? '' : `scale(${sx.toFixed(3)},${sy.toFixed(3)})`;
+    const prevSx = r.rigWrap._prevSx, prevSy = r.rigWrap._prevSy;
+    if (prevSx === undefined || Math.abs(sx - prevSx) > 0.003 || Math.abs(sy - prevSy) > 0.003) {
+      r.rigWrap._prevSx = sx; r.rigWrap._prevSy = sy;
+      r.rigWrap.style.transform = (sx === 1 && sy === 1) ? '' : `scale(${sx.toFixed(3)},${sy.toFixed(3)})`;
+    }
 
     // ---- Legs: walk cycle owns all four; a grounded kick gets a support-leg weight
     // transfer on the back leg while CSS drives the striking front leg via the
@@ -632,12 +679,12 @@ export class Fighter {
     if (this.state === 'walk') {
       this.walkPhase += dt * (6 + Math.abs(this.vx) * 0.02);
       const swing = Math.sin(this.walkPhase) * 26;
-      r.legFU.style.transform = `rotate(${swing}deg)`;
-      r.legBU.style.transform = `rotate(${-swing}deg)`;
-      r.legFL.style.transform = `rotate(${Math.max(0, -swing * 0.6)}deg)`;
-      r.legBL.style.transform = `rotate(${Math.max(0, swing * 0.6)}deg)`;
+      setRot(r.legFU, swing);
+      setRot(r.legBU, -swing);
+      setRot(r.legFL, Math.max(0, -swing * 0.6));
+      setRot(r.legBL, Math.max(0, swing * 0.6));
     } else {
-      r.legFU.style.transform = ''; r.legFL.style.transform = '';
+      clearRot(r.legFU); clearRot(r.legFL);
       const kicking = this.state === 'attack' && this.grounded &&
         (this.attackType === 'kick' || this.attackType === 'lowkick') && this.attackDurations;
       if (kicking) {
@@ -650,10 +697,10 @@ export class Fighter {
           p = 1 - Math.min(1, elapsed / rd);
         }
         const bend = Math.sin(Math.min(1, Math.max(0, p)) * Math.PI * 0.5) * 22;
-        r.legBU.style.transform = `rotate(${(bend * 0.7).toFixed(1)}deg)`;
-        r.legBL.style.transform = `rotate(${(-bend * 0.9).toFixed(1)}deg)`;
+        setRot(r.legBU, bend * 0.7);
+        setRot(r.legBL, -bend * 0.9);
       } else {
-        r.legBU.style.transform = ''; r.legBL.style.transform = '';
+        clearRot(r.legBU); clearRot(r.legBL);
       }
     }
 
@@ -663,21 +710,21 @@ export class Fighter {
     if (this.ikPunch) {
       const p = (this.timeSec - this.ikPunch.start) / this.ikPunch.dur;
       if (p >= 1) {
-        r.armFU.style.transform = ''; r.armFL.style.transform = ''; this.ikPunch = null;
+        clearRot(r.armFU); clearRot(r.armFL); this.ikPunch = null;
       } else {
         const target = sampleHand(PUNCH_KEYS, Math.max(0, p));
         const sol = armIK.solve(ARM_ROOT, target, 1);
         const upperDeg = (sol.upperAngle - ARM_REST_U) * 180 / Math.PI;
         const lowerDeg = ((sol.lowerAngle - ARM_REST_L) * 180 / Math.PI) - upperDeg;
-        r.armFU.style.transform = `rotate(${upperDeg.toFixed(1)}deg)`;
-        r.armFL.style.transform = `rotate(${lowerDeg.toFixed(1)}deg)`;
+        setRot(r.armFU, upperDeg);
+        setRot(r.armFL, lowerDeg);
       }
     } else if (this.state === 'idle') {
       const m = Math.sin((t + this._idleSeed) * 1.8 * pose.swaySpeed) * 2.2 * pose.swayAmp;
-      r.armFU.style.transform = `rotate(${m.toFixed(1)}deg)`;
-      r.armFL.style.transform = `rotate(${(m * 0.5).toFixed(1)}deg)`;
+      setRot(r.armFU, m);
+      setRot(r.armFL, m * 0.5);
     } else {
-      r.armFU.style.transform = ''; r.armFL.style.transform = '';
+      clearRot(r.armFU); clearRot(r.armFL);
     }
 
     // ---- Back arm: counter-rotates for a punch/rush's hip-and-shoulder drive (the classic
@@ -686,14 +733,14 @@ export class Fighter {
     if (this.ikPunch && (this.attackType === 'punch' || this.attackType === 'rush')) {
       const p = Math.max(0, Math.min(1, (t - this.ikPunch.start) / this.ikPunch.dur));
       const swing = p < 0.55 ? -(p / 0.55) * 26 : -26 * (1 - (p - 0.55) / 0.45);
-      r.armBU.style.transform = `rotate(${swing.toFixed(1)}deg)`;
-      r.armBL.style.transform = `rotate(${(swing * 0.6).toFixed(1)}deg)`;
+      setRot(r.armBU, swing);
+      setRot(r.armBL, swing * 0.6);
     } else if (this.state === 'idle') {
       const m = Math.sin((t + this._idleSeed) * 1.8 * pose.swaySpeed + 1.4) * 2.6 * pose.swayAmp;
-      r.armBU.style.transform = `rotate(${m.toFixed(1)}deg)`;
-      r.armBL.style.transform = `rotate(${(m * 0.5).toFixed(1)}deg)`;
+      setRot(r.armBU, m);
+      setRot(r.armBL, m * 0.5);
     } else {
-      r.armBU.style.transform = ''; r.armBL.style.transform = '';
+      clearRot(r.armBU); clearRot(r.armBL);
     }
 
     // Mouth: bare teeth mid-swing / on hit reaction

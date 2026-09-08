@@ -1,6 +1,25 @@
 // js/audio.js — procedural Web Audio synthesis. No asset files, everything is generated.
 let ctx = null;
 
+// OPTIMIZATION: noiseBurst()/crowdSwell() previously allocated a brand-new AudioBuffer
+// and filled it sample-by-sample with Math.random() on every call — up to ~19 of these
+// in a single cheer(), plus one on every punch/kick. AudioBuffers are read-only during
+// playback, so many concurrent AudioBufferSourceNodes can safely share one buffer; each
+// just plays from a random offset via start(when, offset, duration). One shared buffer
+// is generated once, up front, instead of per-hit.
+const NOISE_BUFFER_SECONDS = 2;
+let sharedNoiseBuffer = null;
+
+function getNoiseBuffer() {
+  if (!sharedNoiseBuffer) {
+    const len = Math.floor(ctx.sampleRate * NOISE_BUFFER_SECONDS);
+    sharedNoiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = sharedNoiseBuffer.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  }
+  return sharedNoiseBuffer;
+}
+
 function ensure() {
   if (!ctx) {
     ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -11,6 +30,7 @@ function ensure() {
     document.addEventListener('pageshow', () => {
       if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
     });
+    getNoiseBuffer(); // pre-allocate once, up front, off the hot path
   }
   if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   return ctx;
@@ -34,10 +54,8 @@ function tone(freq1, freq2, dur, type, gain, delay = 0, pan = 0) {
 
 function noiseBurst(dur, gain, filterFreq, delay = 0, pan = 0) {
   const t = ctx.currentTime + delay;
-  const bufSize = Math.floor(ctx.sampleRate * dur);
-  const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufSize);
+  const buf = getNoiseBuffer();
+  const offset = Math.random() * Math.max(0, buf.duration - dur);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   const filt = ctx.createBiquadFilter();
@@ -45,21 +63,20 @@ function noiseBurst(dur, gain, filterFreq, delay = 0, pan = 0) {
   filt.frequency.setValueAtTime(filterFreq, t);
   filt.frequency.exponentialRampToValueAtTime(Math.max(200, filterFreq * 0.3), t + dur);
   const g = ctx.createGain();
+  // The per-sample linear taper baked into the old one-off buffer is now folded into
+  // this gain envelope alone (it already ramped to near-silence by dur's end).
   g.gain.setValueAtTime(gain, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   const panner = ctx.createStereoPanner();
   panner.pan.setValueAtTime(pan, t);
   src.connect(filt).connect(g).connect(panner).connect(ctx.destination);
-  src.start(t);
-  src.stop(t + dur);
+  src.start(t, offset, dur);
 }
 
 function crowdSwell(dur, gain, freqStart, freqEnd, delay = 0) {
   const t = ctx.currentTime + delay;
-  const bufSize = Math.floor(ctx.sampleRate * dur);
-  const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const buf = getNoiseBuffer();
+  const offset = Math.random() * Math.max(0, buf.duration - dur);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   const filt = ctx.createBiquadFilter();
@@ -73,8 +90,7 @@ function crowdSwell(dur, gain, freqStart, freqEnd, delay = 0) {
   g.gain.exponentialRampToValueAtTime(gain, t + dur * 0.25);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   src.connect(filt).connect(g).connect(ctx.destination);
-  src.start(t);
-  src.stop(t + dur);
+  src.start(t, offset, dur);
 }
 
 function applauseBurst(count, spread, gain, delay = 0) {
@@ -137,5 +153,6 @@ export const Audio = {
     if (!activeCtx) return;
     const fn = SFX[name];
     if (fn) fn(...args);
+    else console.warn(`[audio] unknown SFX name: "${name}"`); // surfaces typo'd call sites immediately instead of a silent no-op
   }
 };

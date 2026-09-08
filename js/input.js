@@ -123,6 +123,7 @@ export function initInput(root) {
   const wasDown = { left: false, right: false };
 
   document.addEventListener('keydown', e => {
+    if (e.repeat) return; // ignore OS auto-repeat — stampPress/preventDefault already no-op'd here, this just skips the unnecessary work
     const key = downMap[e.key];
     if (!key) return;
     e.preventDefault();

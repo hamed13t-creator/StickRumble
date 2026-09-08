@@ -54,8 +54,8 @@ function buildCrowdRow(rand, w, y, spacing, r, opts = {}) {
 
     out += `<g transform="translate(${(x + parseFloat(xOffset)).toFixed(1)},${(y + parseFloat(yOffset)).toFixed(1)})">` +
       `<animateTransform attributeName="transform" type="translate" additive="sum" values="0,0;0,${-bob};0,0" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` +
-      `<circle r="${r}" fill="${color}"/>` +
-      `<circle cy="${(-r * 0.9).toFixed(1)}" r="${(r * 0.55).toFixed(1)}" fill="#e8c39e" opacity=".9"/>` +
+      `<circle class="crowdDot" r="${r}" fill="${color}"/>` +
+      `<circle class="crowdDot" cy="${(-r * 0.9).toFixed(1)}" r="${(r * 0.55).toFixed(1)}" fill="#e8c39e" opacity=".9"/>` +
       (rand() < armChance * (0.5 + rand() * 1.5) ? armOrFlag(rand, r) : '') +
       `</g>`;
 

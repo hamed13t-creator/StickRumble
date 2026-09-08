@@ -421,6 +421,16 @@ function loop(ts) {
     p1.update(dt, playerInput, p2, playerDash);
     p2.update(dt, cpuInput, p1, ai.dashDir);
 
+    // BUGFIX: attack resolution is deferred inside Fighter.update() (see
+    // pendingResolve in fighter.js) and applied here, after BOTH fighters have
+    // advanced their own attack phase for this frame. Previously p1.update() could
+    // resolve its hit mid-call and flip p2.state to 'hitstun' before p2.update() ran —
+    // p2's own updateAttackState() early-returns once state !== 'attack', so a
+    // same-frame trade silently dropped p2's hit and gave p1 deterministic priority
+    // on every simultaneous exchange.
+    p1.resolvePending(p2);
+    p2.resolvePending(p1);
+
     dispatchEvents(p1, p2);
     dispatchEvents(p2, p1);
 
