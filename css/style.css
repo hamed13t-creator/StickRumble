@@ -349,8 +349,10 @@ body.hitstop .spark, body.hitstop .streak, body.hitstop .blood{ animation-play-s
 
 /* ================= Upgrades ================= */
 
-/* Crowd cheer pulse effect */
-.bgLayer.crowdCheer circle {
+/* Crowd cheer pulse effect — scoped to .crowdDot (buildCrowdRow's body/head circles)
+   only. Was a bare `circle` selector, which also matched stars, marquee bulbs, and
+   bokeh across all 5 background layers (150-300+ elements) every time pulse() fired. */
+.bgLayer.crowdCheer .crowdDot {
   animation: crowdPulse 1.2s ease-in-out infinite;
 }
 @keyframes crowdPulse {
