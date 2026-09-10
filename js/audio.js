@@ -1,6 +1,6 @@
 // js/audio.js — procedural Web Audio synthesis. No asset files, everything is generated.
 let ctx = null;
-
+ 
 // OPTIMIZATION: noiseBurst()/crowdSwell() previously allocated a brand-new AudioBuffer
 // and filled it sample-by-sample with Math.random() on every call — up to ~19 of these
 // in a single cheer(), plus one on every punch/kick. AudioBuffers are read-only during
@@ -9,7 +9,7 @@ let ctx = null;
 // is generated once, up front, instead of per-hit.
 const NOISE_BUFFER_SECONDS = 2;
 let sharedNoiseBuffer = null;
-
+ 
 function getNoiseBuffer() {
   if (!sharedNoiseBuffer) {
     const len = Math.floor(ctx.sampleRate * NOISE_BUFFER_SECONDS);
@@ -19,7 +19,7 @@ function getNoiseBuffer() {
   }
   return sharedNoiseBuffer;
 }
-
+ 
 function ensure() {
   if (!ctx) {
     ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -35,7 +35,7 @@ function ensure() {
   if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   return ctx;
 }
-
+ 
 function tone(freq1, freq2, dur, type, gain, delay = 0, pan = 0) {
   const t = ctx.currentTime + delay;
   const o = ctx.createOscillator();
@@ -51,7 +51,7 @@ function tone(freq1, freq2, dur, type, gain, delay = 0, pan = 0) {
   o.start(t);
   o.stop(t + dur);
 }
-
+ 
 function noiseBurst(dur, gain, filterFreq, delay = 0, pan = 0) {
   const t = ctx.currentTime + delay;
   const buf = getNoiseBuffer();
@@ -72,7 +72,7 @@ function noiseBurst(dur, gain, filterFreq, delay = 0, pan = 0) {
   src.connect(filt).connect(g).connect(panner).connect(ctx.destination);
   src.start(t, offset, dur);
 }
-
+ 
 function crowdSwell(dur, gain, freqStart, freqEnd, delay = 0) {
   const t = ctx.currentTime + delay;
   const buf = getNoiseBuffer();
@@ -92,14 +92,14 @@ function crowdSwell(dur, gain, freqStart, freqEnd, delay = 0) {
   src.connect(filt).connect(g).connect(ctx.destination);
   src.start(t, offset, dur);
 }
-
+ 
 function applauseBurst(count, spread, gain, delay = 0) {
   for (let i = 0; i < count; i++) {
     const d = delay + Math.random() * spread;
     noiseBurst(0.025 + Math.random() * 0.025, gain * (0.6 + Math.random() * 0.4), 3200 + Math.random() * 2400, d, (Math.random() - 0.5) * 0.8);
   }
 }
-
+ 
 const SFX = {
   punch() {
     tone(190, 65, 0.09, 'square', 0.22, 0, -0.2);
@@ -141,7 +141,7 @@ const SFX = {
     }
   },
 };
-
+ 
 export const Audio = {
   unlock() { ensure(); },
   // BUGFIX: this previously dropped every argument after `name`, so
@@ -156,3 +156,4 @@ export const Audio = {
     else console.warn(`[audio] unknown SFX name: "${name}"`); // surfaces typo'd call sites immediately instead of a silent no-op
   }
 };
+ 
