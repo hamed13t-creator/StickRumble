@@ -7,9 +7,9 @@
 // `input`. Output is still the same binary input.left/input.right the rest of the
 // codebase (fighter.js, ai.js) expects — no analog walk/run speed. Adding that would be
 // a fighter.js physics change (scaling targetVx by deflection), not an input.js one.
-
+ 
 export const input = { left: false, right: false, jump: false, punch: false, kick: false, block: false };
-
+ 
 // Block can now be held from three independent sources (keyboard, the on-screen GUARD
 // button, and the joystick pulled down for the new crouch/guard command) — tracked
 // separately and OR'd into input.block so releasing one source doesn't clear a hold
@@ -18,12 +18,12 @@ const blockSources = { key: false, button: false, joyDown: false };
 function updateBlock() {
   input.block = blockSources.key || blockSources.button || blockSources.joyDown;
 }
-
+ 
 const DASH_WINDOW = 320;
 let lastTapDir = null;
 let lastTapTime = 0;
 export const dashEvents = []; // { dir: 1|-1 } pushed here, consumed by main.js each frame
-
+ 
 function noteDirectionTap(dir) {
   const now = performance.now();
   if (lastTapDir === dir && now - lastTapTime < DASH_WINDOW) {
@@ -33,24 +33,24 @@ function noteDirectionTap(dir) {
     lastTapDir = dir; lastTapTime = now;
   }
 }
-
+ 
 // ---- Joystick Up / Down commands: Up = Jump, a second Up within FLIP_DOUBLE_WINDOW =
 // Front Flip (mirrors the horizontal double-tap-to-dash pattern above), Down = hold
 // Block/Crouch (feeds the same blockSources.joyDown slot as any other block source). ----
 const FLIP_DOUBLE_WINDOW = 250;
 let lastUpTapTime = 0;
 export const flipEvents = []; // { kind: 'front' } pushed on a qualifying Up-Up; consumed by main.js each frame
-
+ 
 // ---- Input buffering for punch/kick/jump ----
 const INPUT_BUFFER_MS = 320; // matched to KO hit-stop freeze duration
 const pressStamp = { punch: 0, kick: 0, jump: 0 };
-
+ 
 function stampPress(key) {
   if ((key === 'punch' || key === 'kick' || key === 'jump') && !input[key]) {
     pressStamp[key] = performance.now();
   }
 }
-
+ 
 function consumeBuffered(key, now) {
   if (pressStamp[key] && now - pressStamp[key] <= INPUT_BUFFER_MS) {
     pressStamp[key] = 0;
@@ -58,12 +58,12 @@ function consumeBuffered(key, now) {
   }
   return false;
 }
-
+ 
 function vibrate(ms) {
   if (!navigator.vibrate) return;
   try { navigator.vibrate(ms); } catch (_) { /* ignore unsupported */ }
 }
-
+ 
 // ---- Virtual joystick ----
 // JOY_MAX_R: how far (px) the knob can travel from center before clamping.
 // JOY_DEADZONE: fraction of JOY_MAX_R the thumb must cross before left/right registers,
@@ -74,10 +74,10 @@ const JOY_DEADZONE = 0.28;
 // Crouch) commands — the joystick was previously horizontal-only.
 const JOY_UP_DEADZONE = 0.32;
 const JOY_DOWN_DEADZONE = 0.32;
-
+ 
 let joyDir = null; // null | -1 | 1 — current registered horizontal direction
 let joyVert = null; // null | 'up' | 'down' — current registered vertical direction
-
+ 
 function setJoyDirection(dir) {
   if (dir === joyDir) return;
   if (dir !== null) noteDirectionTap(dir); // same "fresh press" rule keyboard used, so double-flick still dashes
@@ -85,7 +85,7 @@ function setJoyDirection(dir) {
   input.right = dir === 1;
   joyDir = dir;
 }
-
+ 
 function setJoyVert(dir) {
   if (dir === joyVert) return;
   if (dir === 'up') {
@@ -110,15 +110,15 @@ function setJoyVert(dir) {
   }
   joyVert = dir;
 }
-
+ 
 function initJoystick(root) {
   const wrap = root.querySelector('#joystickWrap');
   const knob = root.querySelector('#joystickKnob');
   if (!wrap || !knob) return;
-
+ 
   let originX = 0, originY = 0, active = false;
   const resetKnob = () => { knob.style.transform = 'translate(-50%,-50%)'; };
-
+ 
   const onMove = e => {
     if (!active) return;
     e.preventDefault();
@@ -133,14 +133,14 @@ function initJoystick(root) {
     if (dx <= -deadR) setJoyDirection(-1);
     else if (dx >= deadR) setJoyDirection(1);
     else setJoyDirection(null);
-
+ 
     const upDeadR = JOY_MAX_R * JOY_UP_DEADZONE;
     const downDeadR = JOY_MAX_R * JOY_DOWN_DEADZONE;
     if (dy <= -upDeadR) setJoyVert('up');
     else if (dy >= downDeadR) setJoyVert('down');
     else setJoyVert(null);
   };
-
+ 
   wrap.addEventListener('pointerdown', e => {
     e.preventDefault();
     try { wrap.setPointerCapture(e.pointerId); } catch (_) {}
@@ -163,7 +163,7 @@ function initJoystick(root) {
   wrap.addEventListener('pointercancel', release);
   wrap.addEventListener('lostpointercapture', release);
 }
-
+ 
 export function initInput(root) {
   // ---- Keyboard ----
   const downMap = {
@@ -175,7 +175,7 @@ export function initInput(root) {
     'l': 'block', 'L': 'block', 'ArrowDown': 'block', 's': 'block', 'S': 'block'
   };
   const wasDown = { left: false, right: false };
-
+ 
   document.addEventListener('keydown', e => {
     if (e.repeat) return; // ignore OS auto-repeat — stampPress/preventDefault already no-op'd here, this just skips the unnecessary work
     const key = downMap[e.key];
@@ -187,7 +187,7 @@ export function initInput(root) {
     stampPress(key);
     input[key] = true;
   });
-
+ 
   document.addEventListener('keyup', e => {
     const key = downMap[e.key];
     if (!key) return;
@@ -195,7 +195,7 @@ export function initInput(root) {
     input[key] = false;
     if (key === 'left' || key === 'right') wasDown[key] = false;
   });
-
+ 
   // Losing window focus mid-hold (alt-tab, opening devtools) previously left keys
   // stuck "down" forever since no keyup ever fires — main.js auto-pauses on
   // visibilitychange, but this clears the raw state too so nothing is stuck once resumed.
@@ -205,10 +205,10 @@ export function initInput(root) {
     joyDir = null; joyVert = null;
     blockSources.key = blockSources.button = blockSources.joyDown = false;
   });
-
+ 
   // ---- Touch/mouse: virtual joystick ----
   initJoystick(root);
-
+ 
   // ---- Touch/mouse: action buttons ----
   root.querySelectorAll('[data-key]').forEach(btn => {
     const key = btn.dataset.key;
@@ -230,7 +230,7 @@ export function initInput(root) {
     btn.addEventListener('lostpointercapture', off);
   });
 }
-
+ 
 // ---- Buffered-edge helper ----
 export function edgesFrom(prev) {
   const now = performance.now();
@@ -243,11 +243,12 @@ export function edgesFrom(prev) {
   Object.assign(prev, input);
   return e;
 }
-
+ 
 export function consumeDash() {
   return dashEvents.shift() || null;
 }
-
+ 
 export function consumeFlip() {
   return flipEvents.shift() || null;
 }
+ 
