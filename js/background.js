@@ -15,19 +15,19 @@
 // foreground. All motion is SVG SMIL (<animate>/<animateTransform>) so it costs zero
 // per-frame JS — only layer-level pan/zoom (update()) touches the DOM each frame.
 import { WORLD_W, STAGE_W, STAGE_H } from './world.js';
-
+ 
 function seeded(seed) {
   let s = seed;
   return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
 }
-
+ 
 const CROWD_COLORS = ['#3f7bff', '#ff5c5c', '#ffcf4d', '#7fffd4', '#c97b3d', '#a86bff', '#ff8fd1', '#5ce1ff'];
 const LIGHT_COLORS = ['#2e6bff', '#ff3b3b', '#ffcf4d', '#a86bff', '#7fffd4'];
 const AD_COLORS = ['#2e6bff', '#ff3b3b', '#ffcf4d', '#7fffd4', '#a86bff'];
 const BOKEH_COLORS = ['#ffcf4d', '#ff3b3b', '#2e6bff', '#7fffd4'];
-
+ 
 function pick(rand, arr) { return arr[Math.floor(rand() * arr.length)]; }
-
+ 
 function armOrFlag(rand, r) {
   const flagColor = pick(rand, LIGHT_COLORS);
   const side = rand() < 0.5 ? -1 : 1;
@@ -38,7 +38,7 @@ function armOrFlag(rand, r) {
     `<polygon points="0,${(-len).toFixed(1)} ${(side * len * 0.7).toFixed(1)},${(-len * 1.3).toFixed(1)} 0,${(-len * 1.6).toFixed(1)}" fill="${flagColor}" opacity=".9"/>` +
     `</g>`;
 }
-
+ 
 // ---- Chaotic crowd row builder ----
 // `arch` bows the row into a shallow parabola — highest at row-center, tapering to 0 at
 // the row's outer edges — instead of a flat horizontal line. Layering several rows with
@@ -61,19 +61,19 @@ function buildCrowdRow(rand, w, y, spacing, r, opts = {}) {
     const nx = Math.max(0, Math.min(1, x / w));      // normalized position across the row
     const bulge = arch ? arch * (1 - Math.pow(nx * 2 - 1, 2)) : 0; // parabolic stadium bow
     const rowY = y - bulge;
-
+ 
     out += `<g transform="translate(${(x + parseFloat(xOffset)).toFixed(1)},${(rowY + parseFloat(yOffset)).toFixed(1)})">` +
       `<animateTransform attributeName="transform" type="translate" additive="sum" values="0,0;0,${-bob};0,0" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` +
       `<circle class="crowdDot" r="${r}" fill="${color}"/>` +
       `<circle class="crowdDot" cy="${(-r * 0.9).toFixed(1)}" r="${(r * 0.55).toFixed(1)}" fill="#e8c39e" opacity=".9"/>` +
       (rand() < armChance * (0.5 + rand() * 1.5) ? armOrFlag(rand, r) : '') +
       `</g>`;
-
+ 
     x += spacing * (0.6 + rand() * 0.9); // irregular spacing increment
   }
   return out;
 }
-
+ 
 // ---- Stacked stadium terrace behind the crowd, for depth/context ----
 function buildTierBackdrop(w, baseY, tiers, tierH, colorA, colorB) {
   let out = '';
@@ -84,7 +84,7 @@ function buildTierBackdrop(w, baseY, tiers, tierH, colorA, colorB) {
   }
   return out;
 }
-
+ 
 // ---- Night sky: gradient + twinkling stars ----
 function buildSkyLayer(w, h, rand) {
   const starCount = Math.round(w / 14);
@@ -103,7 +103,7 @@ function buildSkyLayer(w, h, rand) {
   }
   return out;
 }
-
+ 
 // ---- Overhead rigging truss with slowly sweeping spotlight beam cones ----
 function buildTrussLayer(w, h, rand) {
   const trussY = h * 0.1;
@@ -127,7 +127,7 @@ function buildTrussLayer(w, h, rand) {
   }
   return out;
 }
-
+ 
 // ---- Neon marquee sign with a chase-lit bulb strip ----
 function buildMarquee(w, y) {
   const cx = w / 2, signW = Math.min(440, w * 0.42), signH = 46;
@@ -147,7 +147,7 @@ function buildMarquee(w, y) {
     `<text x="${cx.toFixed(1)}" y="${(y - signH / 2 + 7).toFixed(1)}" text-anchor="middle" font-family="Trebuchet MS, Segoe UI, sans-serif" font-weight="900" font-size="21" letter-spacing="3" fill="#ff3b3b" stroke="#ffcf4d" stroke-width="0.6">STICK RUMBLE</text>` +
     bulbs + `</g>`;
 }
-
+ 
 // ---- Ringside ad barricade: abstract sponsor-style color blocks, no real branding ----
 function buildAdBanner(w, y, h, rand) {
   let out = `<rect x="0" y="${y.toFixed(1)}" width="${w}" height="${h}" fill="#12101a"/>`;
@@ -159,7 +159,7 @@ function buildAdBanner(w, y, h, rand) {
   }
   return out;
 }
-
+ 
 // ---- Scattered photographer camera-flash sparkles among the mid crowd ----
 function buildFlashes(w, count, rand, yTop, yBottom) {
   let out = '';
@@ -174,7 +174,7 @@ function buildFlashes(w, count, rand, yTop, yBottom) {
   }
   return out;
 }
-
+ 
 // ---- Soft blurred foreground bokeh, drifting slowly, sits nearest the camera ----
 function buildBokeh(w, h, rand, count) {
   let out = `<defs><filter id="bokehBlur" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4.5"/></filter></defs>`;
@@ -189,7 +189,7 @@ function buildBokeh(w, h, rand, count) {
   }
   return out;
 }
-
+ 
 export class ParallaxBackground {
   constructor(containerEl) {
     this.container = containerEl;
@@ -197,7 +197,7 @@ export class ParallaxBackground {
     this._pulseTimer = null;
     this._build();
   }
-
+ 
   _makeLayer(factor, widthMult) {
     const w = STAGE_W * widthMult;
     const svgNS = 'http://www.w3.org/2000/svg';
@@ -209,18 +209,18 @@ export class ParallaxBackground {
     this.container.appendChild(svg);
     return { el: svg, factor, width: w };
   }
-
+ 
   _build() {
     // Layer 1 — night sky + stars (farthest, barely moves)
     const sky = this._makeLayer(0.05, 1.3);
     sky.el.innerHTML = buildSkyLayer(sky.width, STAGE_H, seeded(7));
     this.layers.push(sky);
-
+ 
     // Layer 2 — spotlight truss with sweeping beam cones
     const truss = this._makeLayer(0.12, 1.4);
     truss.el.innerHTML = buildTrussLayer(truss.width, STAGE_H, seeded(13));
     this.layers.push(truss);
-
+ 
     // Layer 3 — far stadium tiers, seeded crowd, and the marquee sign
     const far = this._makeLayer(0.2, 1.6);
     const rFar = seeded(29);
@@ -232,7 +232,7 @@ export class ParallaxBackground {
     }
     far.el.innerHTML = farHtml;
     this.layers.push(far);
-
+ 
     // Layer 4 — mid tiers, crowd with flags, camera flashes, ringside ad barricade
     const mid = this._makeLayer(0.42, 1.9);
     const rMid = seeded(41);
@@ -245,13 +245,13 @@ export class ParallaxBackground {
     midHtml += buildAdBanner(mid.width, midBaseY - 14, 14, seeded(53)); // frontmost, drawn last so it sits in front of the crowd
     mid.el.innerHTML = midHtml;
     this.layers.push(mid);
-
+ 
     // Layer 5 — soft bokeh foreground, nearest the camera
     const fg = this._makeLayer(0.6, 1.2);
     fg.el.innerHTML = buildBokeh(fg.width, STAGE_H, seeded(97), 14);
     this.layers.push(fg);
   }
-
+ 
   update(cameraCenterX, zoom = 1) {
     this.layers.forEach(layer => {
       const shift = (cameraCenterX - WORLD_W / 2) * layer.factor;
@@ -261,7 +261,7 @@ export class ParallaxBackground {
       layer.el.style.transformOrigin = 'center center';
     });
   }
-
+ 
   // Crowd "surge" — briefly pulses every layer via the .bgLayer.crowdCheer CSS rule
   // (already defined in style.css, previously never triggered from anywhere).
   // intensity: roughly 0.5 (small reaction) to 3 (KO / match-winning moment).
