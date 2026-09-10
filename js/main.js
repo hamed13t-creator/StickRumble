@@ -8,7 +8,7 @@ import { input, initInput, edgesFrom, consumeDash, consumeFlip } from './input.j
 import { Audio } from './audio.js';
 import * as FX from './effects.js';
 import { STAGE_W, STAGE_H, WORLD_W } from './world.js';
-
+ 
 // ---------------- DOM refs ----------------
 const selectScreen = document.getElementById('selectScreen');
 const gameScreen = document.getElementById('gameScreen');
@@ -38,11 +38,11 @@ const cpuCharNameEl = document.getElementById('cpuCharName');
 const youPipsEl = document.getElementById('youPips');
 const cpuPipsEl = document.getElementById('cpuPips');
 const controlsRoot = document.getElementById('controls');
-
+ 
 // ---------------- Select-screen state ----------------
 let pickedKey = CHARACTERS[0].key;
 let difficulty = 'medium';
-
+ 
 CHARACTERS.forEach(ch => {
   const b = document.createElement('button');
   b.className = 'charBtn';
@@ -54,7 +54,7 @@ function refreshCharSelection() {
   [...charGrid.children].forEach((b, i) => b.classList.toggle('sel', CHARACTERS[i].key === pickedKey));
 }
 refreshCharSelection();
-
+ 
 diffRow.querySelectorAll('.diffBtn').forEach(btn => {
   btn.addEventListener('click', () => {
     diffRow.querySelectorAll('.diffBtn').forEach(b => b.classList.remove('active'));
@@ -63,7 +63,7 @@ diffRow.querySelectorAll('.diffBtn').forEach(btn => {
     ai.setDifficulty(difficulty);
   });
 });
-
+ 
 // ---------------- Stage fit-to-container scaling ----------------
 function fitStage() {
   const w = arenaOuter.clientWidth, h = arenaOuter.clientHeight;
@@ -74,7 +74,7 @@ function fitStage() {
 }
 new ResizeObserver(fitStage).observe(arenaOuter);
 window.addEventListener('resize', fitStage);
-
+ 
 // ---------------- Orientation: landscape only during the fight, free elsewhere ----------------
 // manifest.json no longer declares a blanket "orientation": "landscape" — that forced
 // rotation even on the portrait-friendly select screen for anyone who'd installed the
@@ -90,32 +90,32 @@ function unlockOrientation() {
   const so = screen.orientation;
   if (so && so.unlock) { try { so.unlock(); } catch (_) {} }
 }
-
+ 
 // ---------------- Core game objects ----------------
 initInput(controlsRoot);
 FX.initEffects(worldEl);
 const camera = new Camera(worldEl);
 const background = new ParallaxBackground(bgLayersEl);
 const ai = new AI(difficulty);
-
+ 
 let p1 = null, p2 = null; // p1 = player, p2 = CPU
 let prevPlayerEdge = { punch: false, kick: false, jump: false, block: false };
 let prevCpuEdge = { punch: false, kick: false, jump: false, block: false };
-
+ 
 const ROUND_TIME = 60;
 const ROUNDS_TO_WIN = 2;
 const MAX_ROUNDS = 5;
 let match = null;
 let loopId = null, lastFrameTime = 0;
 let matchSeq = 0;
-
+ 
 // ---------------- Combat effect tiers ----------------
 const SHAKE = { punch: 0.16, kick: 0.32, lowkick: 0.26, rush: 0.55, aerialKick: 0.42, block: 0.1, ko: 0.95 };
 const HITSTOP = { punch: 55, kick: 105, lowkick: 85, rush: 190, aerialKick: 150, block: 45, ko: 320 };
 const SPARKS = { punch: 9, kick: 15, lowkick: 12, rush: 22, aerialKick: 18, block: 8 };
 const STREAKS = { punch: 0, kick: 2, lowkick: 2, rush: 5, aerialKick: 4, block: 0 };
 const BLOOD = { punch: 0.6, kick: 1.1, lowkick: 0.9, rush: 1.8, aerialKick: 1.5 };
-
+ 
 function applyHitStop(ms) {
   if (!match) return;
   const now = performance.now();
@@ -125,13 +125,13 @@ function applyHitStop(ms) {
   clearTimeout(match._hsTimer);
   match._hsTimer = setTimeout(() => document.body.classList.remove('hitstop'), Math.max(0, match.hitStopUntil - performance.now()));
 }
-
+ 
 function updateHealthBars() {
   if (!p1 || !p2) return;
   youHealthEl.style.width = Math.max(0, (p1.health / p1.maxHealth) * 100).toFixed(1) + '%';
   cpuHealthEl.style.width = Math.max(0, (p2.health / p2.maxHealth) * 100).toFixed(1) + '%';
 }
-
+ 
 function buildPips(container) {
   container.innerHTML = '';
   for (let i = 0; i < ROUNDS_TO_WIN; i++) {
@@ -143,11 +143,11 @@ function buildPips(container) {
 function setPips(container, wonCount) {
   [...container.children].forEach((d, i) => d.classList.toggle('won', i < wonCount));
 }
-
+ 
 function dispatchEvents(fighter, opp) {
   const events = fighter.events.slice(); // copy events
   fighter.events.length = 0; // clear immediately to avoid re-triggering
-
+ 
   for (const ev of events) {
     switch (ev.type) {
       case 'hit': {
@@ -206,7 +206,7 @@ function dispatchEvents(fighter, opp) {
     }
   }
 }
-
+ 
 // ---------------- Banner helper ----------------
 let bannerTimer = null;
 function showBanner(text, { cls = '', hold = 900 } = {}) {
@@ -220,40 +220,40 @@ function showBanner(text, { cls = '', hold = 900 } = {}) {
     bannerTimer = setTimeout(() => { bannerEl.classList.remove('show'); resolve(); }, hold);
   });
 }
-
+ 
 // ---------------- Match / round flow ----------------
 function clearWorld() {
   worldEl.innerHTML = '';
 }
-
+ 
 function startMatch(p1Key, p2Key, diff) {
   matchSeq++;
   const myId = matchSeq;
-
+ 
   clearTimeout(bannerTimer);
   bannerEl.classList.remove('show', 'ko', 'taunt');
   koFlashEl.classList.remove('show');
   overlay.style.display = 'none';
   pauseOverlay.style.display = 'none';
   document.body.classList.remove('cheering', 'hitstop');
-
+ 
   clearWorld();
   ai.setDifficulty(diff);
   camera.reset();
-
+ 
   p1 = new Fighter(p1Key, 'p1', true);
   p2 = new Fighter(p2Key, 'p2', false);
   p1.mount(worldEl);
   p2.mount(worldEl);
-
+ 
   prevPlayerEdge = { punch: false, kick: false, jump: false, block: false };
   prevCpuEdge = { punch: false, kick: false, jump: false, block: false };
-
+ 
   diffTagEl.textContent = diff.toUpperCase();
   cpuCharNameEl.textContent = '· ' + p2.ch.name.toUpperCase();
   buildPips(youPipsEl);
   buildPips(cpuPipsEl);
-
+ 
   match = {
     id: myId, p1Key, p2Key, diff,
     p1Rounds: 0, p2Rounds: 0, round: 1,
@@ -261,14 +261,14 @@ function startMatch(p1Key, p2Key, diff) {
     timeLeft: ROUND_TIME, clock: 0,
     hitStopUntil: 0, _hsTimer: null
   };
-
+ 
   updateHealthBars();
   timerEl.textContent = ROUND_TIME;
   lastFrameTime = 0;
-
+ 
   runRoundIntro(myId);
 }
-
+ 
 async function runRoundIntro(myId) {
   if (!match || match.id !== myId) return;
   p1.reset(500);
@@ -282,7 +282,7 @@ async function runRoundIntro(myId) {
   match.timeLeft = ROUND_TIME;
   match.roundActive = true;
 }
-
+ 
 function checkMatchWinner() {
   if (match.p1Rounds >= ROUNDS_TO_WIN) return 'p1';
   if (match.p2Rounds >= ROUNDS_TO_WIN) return 'p2';
@@ -292,31 +292,31 @@ function checkMatchWinner() {
   }
   return null;
 }
-
+ 
 async function endRound(reason, winnerSide) {
   if (!match || !match.roundActive) return;
   const myId = match.id;
   match.roundActive = false;
-
+ 
   if (reason === 'time' && !winnerSide) {
     if (p1.health > p2.health) winnerSide = 'p1';
     else if (p2.health > p1.health) winnerSide = 'p2';
     else winnerSide = null; // exact draw — replay the round
   }
-
+ 
   if (winnerSide) {
     match[winnerSide === 'p1' ? 'p1Rounds' : 'p2Rounds']++;
     setPips(youPipsEl, match.p1Rounds);
     setPips(cpuPipsEl, match.p2Rounds);
   }
-
+ 
   if (reason === 'ko') await showBanner('K.O.!', { cls: 'ko', hold: 1100 });
   else if (!winnerSide) await showBanner('DRAW! REPLAYING ROUND', { hold: 1100 });
   else await showBanner("TIME'S UP", { hold: 800 });
   if (!match || match.id !== myId) return;
-
+ 
   const matchWinner = winnerSide ? checkMatchWinner() : null;
-
+ 
   if (matchWinner) {
     const youWon = matchWinner === 'p1';
     await showBanner(youWon ? 'YOU WIN THE MATCH!' : 'CPU WINS THE MATCH!', { cls: 'ko', hold: 1400 });
@@ -332,7 +332,7 @@ async function endRound(reason, winnerSide) {
     runRoundIntro(myId); // draw — same round number, fresh reset
   }
 }
-
+ 
 function endMatch(winnerSide) {
   if (!match) return;
   match.matchOver = true;
@@ -343,7 +343,7 @@ function endMatch(winnerSide) {
   Audio.play('cheer', 2.2);
   overlay.style.display = 'flex';
 }
-
+ 
 // ---------------- Pause ----------------
 function pauseGame() {
   if (!match || match.matchOver || match.paused) return;
@@ -366,7 +366,7 @@ function exitToSelect() {
   clearWorld();
   unlockOrientation();
 }
-
+ 
 pauseBtn.addEventListener('click', pauseGame);
 resumeBtn.addEventListener('click', resumeGame);
 pauseRestartBtn.addEventListener('click', () => {
@@ -379,13 +379,13 @@ restartBtn.addEventListener('click', () => {
   if (match) startMatch(match.p1Key, match.p2Key, match.diff);
 });
 changeBtn.addEventListener('click', exitToSelect);
-
+ 
 // Auto-pause if the tab/app is backgrounded mid-match, so nobody comes back to find
 // they got KO'd while alt-tabbed.
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) pauseGame();
 });
-
+ 
 // ---------------- Fight! ----------------
 fightBtn.addEventListener('click', () => {
   Audio.unlock(); // guaranteed real user gesture — reliable place to init the AudioContext
@@ -397,7 +397,7 @@ fightBtn.addEventListener('click', () => {
   fitStage();
   startMatch(pickedKey, cpuKey, difficulty);
 });
-
+ 
 // ---------------- Main loop ----------------
 function toFighterInput(cur, edges) {
   return { left: cur.left, right: cur.right, block: cur.block, kickHeld: cur.kick, jumpEdge: edges.jump, punchEdge: edges.punch, kickEdge: edges.kick };
@@ -407,19 +407,19 @@ function computeEdges(cur, prev) {
   Object.assign(prev, cur);
   return e;
 }
-
+ 
 function loop(ts) {
   loopId = requestAnimationFrame(loop);
-
+ 
   if (!match || match.matchOver || match.paused) { lastFrameTime = 0; return; }
-
+ 
   if (!lastFrameTime) lastFrameTime = ts;
   let dt = (ts - lastFrameTime) / 1000;
   lastFrameTime = ts;
   dt = Math.min(dt, 1 / 20); // clamp so a lag spike/tab-switch can't tunnel physics or skip a whole combo window
-
+ 
   match.clock += dt;
-
+ 
   if (match.roundActive) {
     // ---- Player ----
     const playerEdges = edgesFrom(prevPlayerEdge);
@@ -435,15 +435,15 @@ function loop(ts) {
     // input.js. startFlip() already no-ops if the fighter can't act (mid-attack/hitstun).
     const flipEv = consumeFlip();
     if (flipEv) p1.startFlip(flipEv.kind);
-
+ 
     // ---- CPU ----
     const aiDecision = ai.decide(p2, p1, match.clock);
     const cpuEdges = computeEdges(aiDecision, prevCpuEdge);
     const cpuInput = toFighterInput(aiDecision, cpuEdges);
-
+ 
     p1.update(dt, playerInput, p2, playerDash);
     p2.update(dt, cpuInput, p1, ai.dashDir);
-
+ 
     // BUGFIX: attack resolution is deferred inside Fighter.update() (see
     // pendingResolve in fighter.js) and applied here, after BOTH fighters have
     // advanced their own attack phase for this frame. Previously p1.update() could
@@ -453,10 +453,10 @@ function loop(ts) {
     // on every simultaneous exchange.
     p1.resolvePending(p2);
     p2.resolvePending(p1);
-
+ 
     dispatchEvents(p1, p2);
     dispatchEvents(p2, p1);
-
+ 
     match.timeLeft -= dt;
     if (match.timeLeft <= 0) {
       match.timeLeft = 0;
@@ -464,12 +464,13 @@ function loop(ts) {
     }
     timerEl.textContent = Math.ceil(match.timeLeft);
   }
-
+ 
   // Camera/background keep tracking even between rounds (round-intro banners) so the
   // scene settles smoothly onto the reset fighters instead of visibly snapping.
   camera.update(p1, p2, dt);
   const zoom = camera.applyTransform();
   background.update(camera.centerX, zoom);
 }
-
+ 
 loopId = requestAnimationFrame(loop);
+ 
