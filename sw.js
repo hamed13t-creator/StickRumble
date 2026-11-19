@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v2'; // bump this on every asset-affecting deploy to bust old caches
+const CACHE_VERSION = 'v4'; // bump this on every asset-affecting deploy to bust old caches
 const CACHE_NAME = `stick-rumble-${CACHE_VERSION}`;
 const ASSETS = [
   './',
@@ -14,8 +14,11 @@ const ASSETS = [
   './js/effects.js',
   './js/ai.js',
   './js/audio.js',
+  './js/rng.js',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
+  './icons/apple-touch-icon.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -51,8 +54,12 @@ self.addEventListener('fetch', (event) => {
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
       return fetch(event.request).then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        // Only cache good same-origin responses; caching 404/500s used to pin a broken
+        // asset until the next version bump.
+        if (response.ok && response.type === 'basic') {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
         return response;
       }).catch(() => {
         // Fallback for offline if resource isn't cached. BUGFIX: Headers.get('accept')
