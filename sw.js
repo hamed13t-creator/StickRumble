@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v4'; // bump this on every asset-affecting deploy to bust old caches
+const CACHE_VERSION = 'v5'; // bump this on every asset-affecting deploy to bust old caches
 const CACHE_NAME = `stick-rumble-${CACHE_VERSION}`;
 const ASSETS = [
   './',
@@ -15,6 +15,7 @@ const ASSETS = [
   './js/ai.js',
   './js/audio.js',
   './js/rng.js',
+  './js/puppet.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
