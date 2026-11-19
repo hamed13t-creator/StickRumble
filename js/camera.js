@@ -1,5 +1,8 @@
 // js/camera.js — Tekken/Street Fighter style camera: pans to midpoint, zooms with distance,
 // and applies trauma-based shake with transient punch zoom.
+//
+// Render-only: nothing here feeds back into the simulation, so it can use real elapsed
+// time and differ per device without affecting the match.
 import { WORLD_W, GROUND_Y, STAGE_W } from './world.js';
 
 const MIN_VIEW = 340;
@@ -14,6 +17,10 @@ const SHAKE_X = 14, SHAKE_Y = 8;
 const PUNCH_ZOOM = 46;
 const PUNCH_ZOOM_ATTACK = 30;
 const PUNCH_ZOOM_RELEASE = 7;
+// Directional kick: a spring-loaded offset along the hit direction, plus a brief pull of
+// the framing toward the impact point.
+const KICK_STIFFNESS = 520, KICK_DAMPING = 30; // slightly under-damped: one small overshoot
+const FOCUS_PULL = 0.18, FOCUS_RELEASE = 9;
 
 function smoothing(rate, dt) {
   return 1 - Math.exp(-rate * dt);
@@ -30,7 +37,12 @@ export class Camera {
     this._shakeT = 0;
     this.punchZoom = 0;
     this._shakeSeed = Math.random() * 10; // ✅ varied shake pattern per round
+    this.kickX = 0; this.kickV = 0;      // directional recoil offset (screen px) and its velocity
+    this.focusX = 0;                     // world-px pull of the framing toward the last impact
+    this.motionScale = 1;                // 0.5 under prefers-reduced-motion
   }
+
+  setMotionScale(s) { this.motionScale = s; }
 
   reset() {
     this.centerX = WORLD_W / 2;
@@ -41,10 +53,18 @@ export class Camera {
     this.punchZoom = 0;
     this._shakeT = 0;
     this._shakeSeed = Math.random() * 10;
+    this.kickX = 0; this.kickV = 0; this.focusX = 0;
   }
 
   shake(magnitude) {
-    this.trauma = Math.min(1, this.trauma + magnitude);
+    this.trauma = Math.min(1, this.trauma + magnitude * this.motionScale);
+  }
+
+  // Hit recoil: shove the view along the hit direction (dirX = +1 / -1) and pull the
+  // framing toward the impact. px: 6 (jab) to 18 (KO).
+  impact(worldX, dirX, px) {
+    this.kickV += dirX * px * 88 * this.motionScale; // peak offset ≈ px
+    this.focusX = (worldX - this.centerX) * FOCUS_PULL * this.motionScale;
   }
 
   update(fighterA, fighterB, dt = 0.016) {
@@ -56,7 +76,12 @@ export class Camera {
     this.viewW += (targetView - this.viewW) * smoothing(ZOOM_RATE, dt);
 
     const halfView = this.viewW / 2;
-    const clampedMid = Math.max(halfView, Math.min(WORLD_W - halfView, midX));
+    const clampedMid = Math.max(halfView, Math.min(WORLD_W - halfView, midX + this.focusX));
+    this.focusX *= 1 - smoothing(FOCUS_RELEASE, dt);
+    // Spring back to centre (semi-implicit Euler; dt is a display frame, clamped).
+    const sdt = Math.min(dt, 1 / 30);
+    this.kickV += (-KICK_STIFFNESS * this.kickX - KICK_DAMPING * this.kickV) * sdt;
+    this.kickX += this.kickV * sdt;
     this.centerX += (clampedMid - this.centerX) * smoothing(PAN_RATE, dt);
 
     this.trauma = Math.max(0, this.trauma - dt * TRAUMA_DECAY);
@@ -84,7 +109,7 @@ export class Camera {
 
   applyTransform() {
     const zoom = this.getZoom();
-    const e = STAGE_W / 2 - this.centerX * zoom + this.shakeX;
+    const e = STAGE_W / 2 - this.centerX * zoom + this.shakeX + this.kickX;
     const f = GROUND_Y * (1 - zoom) + this.shakeY;
     this.worldEl.style.transform = `matrix(${zoom},0,0,${zoom},${e.toFixed(2)},${f.toFixed(2)})`;
     return zoom;

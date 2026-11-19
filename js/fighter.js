@@ -9,7 +9,7 @@
 // properties style.css never touches, so it layers on top of the existing CSS
 // keyframes (block/jump/kick/lowkick/punch/rush poses) instead of fighting them.
 // Physics, attack timing, state machine, combo logic, and events are unchanged.
-import { GROUND_Y, ARENA_MIN_X, ARENA_MAX_X } from './world.js';
+import { GROUND_Y, ARENA_MIN_X, ARENA_MAX_X, STEP, framesFor } from './world.js';
 
 // ---------------- Roster ----------------
 // Per-character animation/proportion data. Shoulder/elbow/hip/knee stay fixed (style.css
@@ -27,7 +27,7 @@ const POSE = {
 export const CHARACTERS = [
   { key:'boxer',    name:'Boxer',     color:'#3f7bff', accent:'#ffcf4d', skin:'#ffd9b3', accessory:'gloves',    stats:{}, pose: POSE.boxer },
   { key:'ninja',    name:'Ninja',     color:'#2b2b33', accent:'#ff3b3b', skin:'#e8c39e', accessory:'headband',  stats:{ speed:1.25, health:0.85, dashMult:1.3 }, pose: POSE.ninja },
-  { key:'sumo',     name:'Sumo',      color:'#c97b3d', accent:'#fff2d6', skin:'#e8b98a', accessory:'topknot',   stats:{ speed:0.75, health:1.35, knockback:1.5 }, pose: POSE.sumo },
+  { key:'sumo',     name:'Sumo',      color:'#c97b3d', accent:'#fff2d6', skin:'#e8b98a', accessory:'topknot',   stats:{ speed:0.75, health:1.35 } /* knockback resistance now comes from pose.weight */, pose: POSE.sumo },
   { key:'kickboxer',name:'Kickboxer', color:'#e0602b', accent:'#2b2b33', skin:'#d9a066', accessory:'wristbands',stats:{ kickDmg:1.3, punchDmg:0.85 }, pose: POSE.kickboxer },
   { key:'robot',    name:'Robot',     color:'#8f9bab', accent:'#2ee6ff', skin:'#c7ced6', accessory:'antenna',   stats:{ dmgAll:1.2, cooldownMult:1.2 }, pose: POSE.robot },
   { key:'monk',     name:'Monk',      color:'#f0a500', accent:'#7a3a1a', skin:'#e8b98a', accessory:'robe',      stats:{ punchCooldownMult:0.7, kickDmg:0.85 }, pose: POSE.monk }
@@ -246,6 +246,27 @@ const GRAVITY = 2500, JUMP_V = 760, MOVE_ACCEL = 2400, MAX_SPEED = 250, AIR_CONT
 const GROUND_DECEL = 1900, DASH_SPEED = 880, DASH_TIME = 0.16, DASH_COOLDOWN = 0.55, DASH_IFRAME = 0.14;
 const FLIP_TIME = 0.46, BACKFLIP_TIME = 0.36, LANDING_RECOVERY = 0.09;
 const COMBO_WINDOW = 1.1;
+// Visual-state deadlines, in sim frames (replace the old gameplay setTimeouts).
+const HITFLASH_FRAMES = framesFor(0.22);
+const DASH_FX_FRAMES = framesFor(DASH_TIME + 0.06);
+const ATK_CLASS_PAD_FRAMES = framesFor(0.04);
+const ALL_ATK_CLASSES = ['attack-punch', 'attack-kick', 'attack-heavy', 'attack-lowkick', 'aerial'];
+// ---- Knockdown / wall splat (Batch 1). Every duration is in whole sim frames. ----
+const KNOCKDOWN_TIERS = { rush: true, aerialKick: true };          // these launch + knock down
+const LAUNCH = { rush: { vx: 360, vy: 560 }, aerialKick: { vx: 300, vy: 470 } }; // px/s, before weight
+const KO_LAUNCH = { vx: 300, vy: 420 };                            // finishing blow sends the loser flying
+const KD_LIE_FRAMES = framesFor(0.5);      // lying on the floor (invulnerable)
+const KD_RISE_FRAMES = framesFor(0.3);     // getting up (invulnerable)
+const TECH_ROLL_FRAMES = framesFor(0.33);  // hold a direction on landing to roll instead of lying
+const TECH_ROLL_SPEED = 420;
+const WALL_SPLAT_SPEED = 200;              // px/s into the arena edge needed to splat
+const WALL_STICK_FRAMES = framesFor(0.25);
+const WALL_SLIDE_SPEED = 260;              // px/s down the wall after the stick
+const ROLL_ANIM_TIME = 0.33;
+
+// Input object used when a fighter must ignore control (KO'd, or round already decided).
+export const NEUTRAL_INPUT = Object.freeze({ left: false, right: false, block: false, kickHeld: false,
+  jumpEdge: false, punchEdge: false, kickEdge: false, flipRequest: false });
 
 export class Fighter {
   constructor(charKey, side, isPlayer) {
@@ -274,8 +295,28 @@ export class Fighter {
     this._shiftPulseStart = undefined;
     this.events = [];
     this.el = null; this.rig = {};
-    this.timeSec = 0;
+    // Simulation clock: an integer frame count advanced once per fixed sim step.
+    // timeSec is derived from it, so every existing seconds-based timer now lands on
+    // exact frame boundaries and is identical on every device.
+    this.frame = 0;
+    this.attackStartFrame = -1; // identifies one attack (the AI rolls its guard once per attack)
+    this.airFlipUsed = false;
+    // Frame deadlines for visual classes (rendered by render(), never by timers).
+    this.hitflashUntilF = 0; this.dashFxUntilF = 0;
+    this.atkClass = null; this.atkClassUntilF = 0; this.atkClassSeq = 0;
+    this.flipSeq = 0;
+    this._renderedAtkSeq = 0; this._renderedAtkCls = null; this._renderedFlipSeq = 0;
+    // Knockdown / wall splat state.
+    this.kdPhase = null;    // null | 'air' | 'down' | 'rise' | 'roll'
+    this.kdUntilF = 0; this.kdStartFrame = -1; this.rollDir = 0; this.rollSeq = 0; this._renderedRollSeq = 0;
+    this.splatUsed = false; this.wallStuck = false; this.splatUntilF = 0; this.wallSide = 0;
+    // Arena bounds. main.js swaps in the match's shared bounds object so sudden death
+    // can move the walls; these defaults keep a standalone Fighter usable.
+    this.arena = { min: ARENA_MIN_X, max: ARENA_MAX_X };
   }
+
+  get timeSec() { return this.frame * STEP; }
+  get weight() { return this.ch.pose.weight || 1; } // heavier = less knockback taken
 
   mount(container) {
     this.el = document.createElement('div');
@@ -298,17 +339,18 @@ export class Fighter {
   }
 
   reset(x) {
-    clearTimeout(this._atkTimer); // OPTIMIZATION: startAttack() already clears this before
-    // re-arming, but reset() (called every round transition on the same instance) never
-    // did — a leftover timer from the moment just before a round-ending KO could still
-    // fire against next round's fresh attack-class state.
-    clearTimeout(this._hitflashTimer);
     this.x = x; this.y = 0; this.vx = 0; this.vy = 0;
     this.health = this.maxHealth; this.state = 'idle'; this.grounded = true;
     this.attackType = null; this.attackPhase = null; this.comboCount = 0; this.comboBuffer = []; this.hits = 0;
     this.hitstunUntil = 0; this.knockdownUntil = 0; this.invincibleUntil = 0; this.dashCooldownUntil = 0;
     this._dashUntil = 0; this.flipUntil = 0; this._flipStart = 0; this.landingUntil = 0; this.walkPhase = 0;
     this.ikPunch = null; this.hitReaction = null; this.pendingResolve = false; this.events = [];
+    this.flipType = null; this.airFlipUsed = false; this.attackStartFrame = -1;
+    this.bufferedAttack = null; this.attackOutcome = null; this.attackDurations = null;
+    this.hitflashUntilF = 0; this.dashFxUntilF = 0; this.atkClass = null; this.atkClassUntilF = 0;
+    this._renderedAtkCls = null; this._renderedAtkSeq = this.atkClassSeq; this._renderedFlipSeq = this.flipSeq;
+    this.kdPhase = null; this.kdUntilF = 0; this.kdStartFrame = -1; this.rollDir = 0; this._renderedRollSeq = this.rollSeq;
+    this.splatUsed = false; this.wallStuck = false; this.splatUntilF = 0; this.wallSide = 0;
     this._nextShiftAt = this.timeSec + 2 + Math.random() * 3;
     this._shiftPulseStart = undefined;
     if (this.rig.flipSpin) this.rig.flipSpin.style.animation = 'none';
@@ -319,7 +361,7 @@ export class Fighter {
       node._prevRot = 0; node._prevSx = undefined; node._prevSy = undefined;
     });
     this.el.classList.remove('hitflash', 'dashing', 'flipping', 'blocking', 'attack-punch', 'attack-kick',
-      'attack-heavy', 'attack-lowkick', 'aerial', 'jump', 'ko');
+      'attack-heavy', 'attack-lowkick', 'aerial', 'jump', 'ko', 'launched', 'downed', 'rolling', 'wallsplat');
   }
 
   pushEvent(ev) { this.events.push(ev); }
@@ -338,6 +380,7 @@ export class Fighter {
     this.attackType = t;
     this.attackPhase = 'startup';
     this.attackPhaseStart = this.timeSec;
+    this.attackStartFrame = this.frame;
     const cdMult = (this.ch.stats.cooldownMult || 1) * (t === 'punch' ? (this.ch.stats.punchCooldownMult || 1) : 1);
     this.attackDurations = {
       startup: timing.startup * (buffered ? 0.7 : 1),
@@ -347,14 +390,11 @@ export class Fighter {
     this.attackOutcome = null;
     this.bufferedAttack = null;
 
-    const cls = t === 'rush' ? 'attack-heavy' : t === 'aerialKick' ? 'attack-kick aerial' : t === 'lowkick' ? 'attack-lowkick' : `attack-${t}`;
-    const allAtkClasses = ['attack-punch', 'attack-kick', 'attack-heavy', 'attack-lowkick', 'aerial'];
-    this.el.classList.remove(...allAtkClasses);
-    void this.el.offsetWidth;
-    cls.split(' ').forEach(c => this.el.classList.add(c));
-    clearTimeout(this._atkTimer);
-    const animMs = (timing.startup + timing.active) * 1000 + 40;
-    this._atkTimer = setTimeout(() => this.el.classList.remove(...allAtkClasses), animMs);
+    // Pose class is state + a frame deadline; render() applies it (and restarts the CSS
+    // animation when atkClassSeq changes). No timers in the simulation.
+    this.atkClass = t === 'rush' ? 'attack-heavy' : t === 'aerialKick' ? 'attack-kick aerial' : t === 'lowkick' ? 'attack-lowkick' : `attack-${t}`;
+    this.atkClassUntilF = this.frame + framesFor(timing.startup + timing.active) + ATK_CLASS_PAD_FRAMES;
+    this.atkClassSeq++;
 
     if (t === 'punch' || t === 'rush') this.ikPunch = { start: this.timeSec, dur: (timing.startup + timing.active) * 1.6 };
 
@@ -378,6 +418,8 @@ export class Fighter {
     const facingOK = (this.x < opp.x && this.facing === 1) || (this.x > opp.x && this.facing === -1);
     if (dist > timing.range || !facingOK) { this.attackOutcome = 'whiff'; this.pushEvent({ type: 'whoosh' }); return; }
     if (this.timeSec < opp.invincibleUntil) { this.attackOutcome = 'whiff'; return; }
+    if (opp.state === 'ko') { this.attackOutcome = 'whiff'; return; } // round already decided
+    if (opp.state === 'knockdown') { this.attackOutcome = 'whiff'; return; } // no hitting a downed fighter
 
     this.comboCount = (this.timeSec - this.lastHitTime < COMBO_WINDOW) ? this.comboCount + 1 : 1;
     this.lastHitTime = this.timeSec;
@@ -400,28 +442,49 @@ export class Fighter {
       // of being fully blockable or fully unblockable.
       if (t === 'rush' && (opp.state === 'block' || opp.state === 'aerialGuard')) { dmg *= 0.4; opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 }); }
       this.attackOutcome = 'hit';
-      const kb = timing.kb * (opp.ch.stats.knockback ? 1 / opp.ch.stats.knockback : 1);
-      opp.vx += (opp.x >= this.x ? 1 : -1) * kb;
-      opp.vy += t === 'kick' || t === 'aerialKick' ? 140 : 60;
-      opp.hitstunUntil = this.timeSec + (t === 'rush' ? 0.42 : t === 'punch' ? 0.22 : 0.34);
-      opp.state = 'hitstun';
+      const dirX = opp.x >= this.x ? 1 : -1;
+      const w = opp.weight;
+      const lethal = opp.health - dmg <= 0;
+      if (KNOCKDOWN_TIERS[t] || lethal) {
+        // Launch: a real arc instead of the old 60-140 px/s hop. Weight scales distance
+        // fully and height by its square root, so a Sumo stays low and a Ninja flies.
+        const l = LAUNCH[t] || KO_LAUNCH;
+        opp.vx = dirX * l.vx / w;
+        opp.vy = l.vy / Math.sqrt(w);
+        opp.grounded = false;
+        opp.state = 'knockdown'; opp.kdPhase = 'air'; opp.kdStartFrame = this.frame;
+        opp.attackType = opp.attackType && opp.pendingResolve ? opp.attackType : null;
+        opp.wallStuck = false;
+      } else {
+        opp.vx += dirX * timing.kb / w;
+        opp.vy += (t === 'kick' || t === 'aerialKick' ? 140 : 60) / w;
+        opp.hitstunUntil = this.timeSec + (t === 'rush' ? 0.42 : t === 'punch' ? 0.22 : 0.34);
+        opp.state = 'hitstun';
+        opp.wallStuck = false; // a hit knocks a splatted fighter off the wall
+      }
       opp.hitReaction = { tier: t, start: this.timeSec };
       // BUGFIX: rapid pre-hit button presses (an in-progress combo attempt, or a
       // just-queued bufferedAttack) used to survive across the hit and could fire an
       // unintended attack/Rush the instant hitstun cleared. Getting hit now clears both.
       opp.comboBuffer.length = 0;
       opp.bufferedAttack = null;
-      opp.el.classList.add('hitflash');
-      clearTimeout(opp._hitflashTimer); // OPTIMIZATION: was an untracked anonymous
-      // timeout — repeated hits within 220ms (any rush/combo chain) stacked multiple
-      // overlapping timers instead of one tracked, replaceable one.
-      opp._hitflashTimer = setTimeout(() => opp.el && opp.el.classList.remove('hitflash'), 220);
+      opp.hitflashUntilF = this.frame + HITFLASH_FRAMES;
       opp.health = Math.max(0, opp.health - dmg);
       this.hits++;
       this.pushEvent({
         type: 'hit', tier: t, combo: this.comboCount,
         x: opp.x, y: GROUND_Y - opp.y - 45, dirX: (opp.x >= this.x ? 1 : -1), color: this.ch.color
       });
+      // KO is decided here, at the moment of the lethal hit. It used to be detected at the
+      // end of the victim's next update(), which never ran because main.js ended the round
+      // first, so the KO pose, flash, sound and crowd roar never played.
+      if (opp.health <= 0) {
+        opp.state = 'ko';
+        opp.bufferedAttack = null;
+        // opp.pendingResolve is deliberately left alone: if the victim's own strike went
+        // active this same frame, it still resolves (main.js) and the trade is a double KO.
+        opp.pushEvent({ type: 'ko', x: opp.x, y: GROUND_Y - 40, dirX: (opp.x >= this.x ? 1 : -1) });
+      }
     }
   }
 
@@ -467,42 +530,75 @@ export class Fighter {
   // ---------------- Dash / Flip ----------------
   startDash(dir) {
     if (this.timeSec < this.dashCooldownUntil || this.state === 'attack' || this.state === 'hitstun') return;
-    this.dashDir = dir; this.facing = dir >= 0 ? this.facing : this.facing; // facing unaffected by dash direction
+    this.dashDir = dir; // facing is unaffected by dash direction
     this.dashCooldownUntil = this.timeSec + DASH_COOLDOWN;
     this.invincibleUntil = this.timeSec + DASH_IFRAME;
     this._dashUntil = this.timeSec + DASH_TIME;
-    this.el.classList.add('dashing');
-    setTimeout(() => this.el && this.el.classList.remove('dashing'), DASH_TIME * 1000 + 60);
+    this.dashFxUntilF = this.frame + DASH_FX_FRAMES;
     this.pushEvent({ type: 'dash', x: this.x, y: GROUND_Y - this.y - 30 });
   }
 
   startFlip(kind) {
-    if (this.state === 'attack' || this.state === 'hitstun') return;
+    if (this.state === 'attack' || this.state === 'hitstun' || this.state === 'flip' ||
+        this.state === 'landing' || this.state === 'ko' || this.state === 'knockdown' ||
+        this.state === 'wallsplat') return;
+    if (kind === 'front' && !this.grounded) this.airFlipUsed = true;
     this.state = 'flip';
     this.flipType = kind; // 'front' | 'back'
     this.flipUntil = this.timeSec + (kind === 'front' ? FLIP_TIME : BACKFLIP_TIME);
     this._flipStart = this.timeSec;
     this.invincibleUntil = this.timeSec + (kind === 'front' ? FLIP_TIME * 0.7 : BACKFLIP_TIME * 0.8);
     this.vy = Math.max(this.vy, kind === 'front' ? 520 : 420);
-    this.el.classList.add('flipping');
-    this.rig.flipSpin.style.animation = 'none';
-    void this.rig.flipSpin.offsetWidth;
-    this.rig.flipSpin.style.animation = `${kind === 'front' ? 'flipFwd' : 'flipBack'} ${(kind === 'front' ? FLIP_TIME : BACKFLIP_TIME).toFixed(2)}s linear`;
+    this.flipSeq++; // render() restarts the spin animation
     this.pushEvent({ type: 'flip', x: this.x, y: GROUND_Y - this.y - 30 });
   }
 
+  // ---------------- Knockdown / wall splat ----------------
+  // Landing from a launch (or sliding off a wall): roll if a direction is held, else lie down.
+  enterDown(techDir) {
+    this.state = 'knockdown';
+    this.wallStuck = false;
+    if (techDir) {
+      this.kdPhase = 'roll'; this.rollDir = techDir;
+      this.kdUntilF = this.frame + TECH_ROLL_FRAMES;
+      this.rollSeq++;
+      this.pushEvent({ type: 'techroll', x: this.x, y: GROUND_Y });
+    } else {
+      this.kdPhase = 'down';
+      this.kdUntilF = this.frame + KD_LIE_FRAMES;
+      this.pushEvent({ type: 'knockdown', x: this.x, y: GROUND_Y, weight: this.weight });
+    }
+  }
+
+  startWallSplat(side) {
+    this.state = 'wallsplat'; this.kdPhase = null;
+    this.wallSide = side; this.wallStuck = true; this.splatUsed = true;
+    this.splatUntilF = this.frame + WALL_STICK_FRAMES;
+    this.vx = 0; this.vy = 0;
+    this.hitflashUntilF = this.frame + HITFLASH_FRAMES;
+    this.pushEvent({ type: 'wallsplat', x: this.x, y: GROUND_Y - this.y - 45, side });
+  }
+
   // ---------------- Per-frame update ----------------
+  // One fixed sim step (dt is always STEP). Pure simulation: no DOM access; call
+  // render() once per displayed frame to draw the result.
   update(dt, inp, opp, dashRequest) {
-    this.timeSec += dt;
+    this.frame++;
     this.events = [];
     const now = this.timeSec;
+    // Direction held right now: used only to tech-roll when landing from a knockdown.
+    const techDir = inp.right ? 1 : inp.left ? -1 : 0;
+    if (this.state === 'ko' || this.state === 'knockdown' || this.state === 'wallsplat') {
+      inp = NEUTRAL_INPUT; dashRequest = 0; // no control while KO'd, knocked down or splatted
+    }
 
     // Facing always toward opponent unless mid-attack/flip/hitstun (keeps strikes
     // readable and stops the rapid left-right facing flicker that rapid-fire trades
     // could cause when knockback pushes a stunned fighter past the opponent's x — a
     // 2px deadzone additionally prevents flip-flopping when both fighters are almost
     // exactly overlapped at point-blank range).
-    if (this.state !== 'attack' && this.state !== 'flip' && this.state !== 'hitstun') {
+    if (this.state !== 'attack' && this.state !== 'flip' && this.state !== 'hitstun' && this.state !== 'ko' &&
+        this.state !== 'knockdown' && this.state !== 'wallsplat') {
       const dx = opp.x - this.x;
       if (Math.abs(dx) > 2) this.facing = dx >= 0 ? 1 : -1;
     }
@@ -511,6 +607,17 @@ export class Fighter {
     if (this.state === 'hitstun' && now >= this.hitstunUntil) {
       this.state = this.grounded ? 'idle' : 'jump';
     }
+    if (this.state === 'knockdown') {
+      if (this.kdPhase === 'down' && this.frame >= this.kdUntilF) {
+        this.kdPhase = 'rise'; this.kdUntilF = this.frame + KD_RISE_FRAMES;
+      } else if ((this.kdPhase === 'rise' || this.kdPhase === 'roll') && this.frame >= this.kdUntilF) {
+        this.state = 'idle'; this.kdPhase = null; this.vx = 0;
+      }
+    }
+    if (this.state === 'wallsplat' && this.wallStuck && this.frame >= this.splatUntilF) {
+      this.wallStuck = false; // start sliding down
+      if (this.y <= 0) this.enterDown(techDir); // splatted on the ground: straight to the floor
+    }
 
     // ---- Dash trigger ----
     if (dashRequest && this.canAct()) this.startDash(dashRequest);
@@ -518,13 +625,17 @@ export class Fighter {
     // ---- Flip triggers: jump-while-airborne = front flip, block+jump grounded = backflip ----
     if (inp.jumpEdge) {
       if (this.grounded && inp.block) this.startFlip('back');
-      else if (!this.grounded && this.state === 'jump') this.startFlip('front');
-      else if (this.grounded && this.state !== 'attack') {
+      else if (!this.grounded && this.state === 'jump' && !this.airFlipUsed) this.startFlip('front');
+      else if (this.grounded && (this.state === 'idle' || this.state === 'walk')) { // not out of hitstun/landing
         this.vy = JUMP_V * (this.ch.stats.jumpMult || 1);
         this.grounded = false;
         this.state = 'jump';
       }
     }
+
+    // Joystick up-up: same rule as jump-then-jump, once per airtime. (main.js used to call
+    // startFlip() directly, which allowed endless invincible re-flips mid-flip.)
+    if (inp.flipRequest && !this.grounded && this.state === 'jump' && !this.airFlipUsed) this.startFlip('front');
 
     // ---- Aerial guard ("push guard"): holding Kick while airborne from a jump drops
     // into a defensive stance — incoming hits are mitigated the same way a ground block
@@ -540,7 +651,6 @@ export class Fighter {
     if (this.grounded && (this.state === 'idle' || this.state === 'walk' || this.state === 'block')) {
       this.state = inp.block ? 'block' : (Math.abs(this.vx) > 12 ? 'walk' : 'idle');
     }
-    this.el.classList.toggle('blocking', this.state === 'block' || this.state === 'aerialGuard');
 
     // ---- Attack input (edge-triggered, with buffering during any active attack) ----
     // BUGFIX: previously only a press landing during 'recovery' got queued into
@@ -580,6 +690,12 @@ export class Fighter {
     }
     if (dashing) {
       this.vx = this.dashDir * DASH_SPEED * (this.ch.stats.dashMult || 1);
+    } else if (this.state === 'knockdown' && this.kdPhase === 'roll') {
+      this.vx = this.rollDir * TECH_ROLL_SPEED;
+    } else if (!this.grounded && ((this.state === 'knockdown' && this.kdPhase === 'air') || this.state === 'ko')) {
+      // ballistic flight: keep the launch velocity (no air control or drag)
+    } else if (this.state === 'wallsplat') {
+      this.vx = 0;
     } else if (this.state === 'flip') {
       const p = Math.min(1, (now - this._flipStart) / (this.flipType === 'front' ? FLIP_TIME : BACKFLIP_TIME));
       const dir = this.flipType === 'front' ? this.facing : -this.facing;
@@ -590,22 +706,36 @@ export class Fighter {
       this.vx += Math.sign(targetVx - this.vx) * Math.min(Math.abs(targetVx - this.vx), accel * dt);
     }
     this.x += this.vx * dt;
-    this.x = Math.max(ARENA_MIN_X, Math.min(ARENA_MAX_X, this.x));
-    if (this.x === ARENA_MIN_X || this.x === ARENA_MAX_X) this.vx = 0;
+    const lo = this.arena.min, hi = this.arena.max;
+    if (this.x <= lo || this.x >= hi) {
+      const side = this.x <= lo ? -1 : 1;
+      const intoWall = this.vx * side;
+      this.x = side < 0 ? lo : hi;
+      const flying = (this.state === 'knockdown' && this.kdPhase === 'air') || this.state === 'hitstun';
+      if (flying && !this.splatUsed && intoWall >= WALL_SPLAT_SPEED) this.startWallSplat(side);
+      this.vx = 0;
+    }
 
     // ---- Physics: vertical (gravity) ----
-    if (!this.grounded || this.y > 0 || this.vy !== 0) {
+    if (this.state === 'wallsplat' && this.wallStuck) {
+      // pinned to the wall: no gravity during the stick
+    } else if (this.state === 'wallsplat') {
+      this.y = Math.max(0, this.y - WALL_SLIDE_SPEED * dt); // constant slide down the wall
+      if (this.y <= 0) { this.grounded = true; this.vy = 0; this.enterDown(techDir); }
+    } else if (!this.grounded || this.y > 0 || this.vy !== 0) {
       this.vy -= GRAVITY * dt;
       this.y += this.vy * dt;
       if (this.y <= 0) {
         this.y = 0; this.vy = 0;
         if (!this.grounded) this.pushEvent({ type: 'land', x: this.x, y: GROUND_Y });
         this.grounded = true;
+        this.airFlipUsed = false;
         if (this.state === 'jump' || this.state === 'aerialGuard') this.state = 'idle';
         if (this.state === 'flip') {
           this.state = 'landing';
           this.landingUntil = now + LANDING_RECOVERY;
         }
+        if (this.state === 'knockdown' && this.kdPhase === 'air') this.enterDown(techDir);
       } else {
         this.grounded = false;
       }
@@ -615,19 +745,49 @@ export class Fighter {
     // ---- Walk vs idle bookkeeping ----
     if (this.grounded && (this.state === 'idle' || this.state === 'walk')) {
       this.state = Math.abs(this.vx) > 12 ? 'walk' : 'idle';
+      this.splatUsed = false; // back to neutral: the next combo may splat again
     }
+  }
 
-    // ---- KO check ----
-    if (this.health <= 0 && this.state !== 'ko') {
-      this.state = 'ko';
-      this.pushEvent({ type: 'ko', x: this.x, y: GROUND_Y - 40 });
+  // ---------------- Rendering (once per displayed frame) ----------------
+  // jitterPx: render-only shake applied to the hit-stop victim (main.js).
+  render(dt, jitterPx = 0) {
+    const el = this.el, f = this.frame;
+    el.classList.toggle('launched', this.state === 'knockdown' && this.kdPhase === 'air');
+    el.classList.toggle('downed', this.state === 'knockdown' && this.kdPhase === 'down');
+    el.classList.toggle('rolling', this.state === 'knockdown' && this.kdPhase === 'roll');
+    el.classList.toggle('wallsplat', this.state === 'wallsplat');
+    // Fall backwards, away from the way the fighter is facing; splat leans into the wall.
+    el.style.setProperty('--fall', this.facing > 0 ? '-84deg' : '84deg');
+    el.style.setProperty('--splatTilt', this.wallSide < 0 ? '-10deg' : '10deg');
+    el.classList.toggle('blocking', this.state === 'block' || this.state === 'aerialGuard');
+    el.classList.toggle('dashing', f < this.dashFxUntilF);
+    el.classList.toggle('hitflash', f < this.hitflashUntilF);
+    const wantAtk = f < this.atkClassUntilF ? this.atkClass : null;
+    if (wantAtk !== this._renderedAtkCls || this.atkClassSeq !== this._renderedAtkSeq) {
+      el.classList.remove(...ALL_ATK_CLASSES);
+      if (wantAtk) { void el.offsetWidth; wantAtk.split(' ').forEach(c => el.classList.add(c)); } // reflow restarts the keyframes
+      this._renderedAtkCls = wantAtk; this._renderedAtkSeq = this.atkClassSeq;
     }
-
-    this._render(dt);
+    if (this.flipSeq !== this._renderedFlipSeq) {
+      this._renderedFlipSeq = this.flipSeq;
+      const spin = this.rig.flipSpin;
+      spin.style.animation = 'none';
+      void spin.offsetWidth;
+      spin.style.animation = `${this.flipType === 'front' ? 'flipFwd' : 'flipBack'} ${(this.flipType === 'front' ? FLIP_TIME : BACKFLIP_TIME).toFixed(2)}s linear`;
+    }
+    if (this.rollSeq !== this._renderedRollSeq) {
+      this._renderedRollSeq = this.rollSeq;
+      const spin = this.rig.flipSpin;
+      spin.style.animation = 'none';
+      void spin.offsetWidth;
+      spin.style.animation = `${this.rollDir === this.facing ? 'flipFwd' : 'flipBack'} ${ROLL_ANIM_TIME}s linear`;
+    }
+    this._render(dt, jitterPx);
   }
 
   // ---------------- Rendering ----------------
-  _render(dt) {
+  _render(dt, jitterPx = 0) {
     const el = this.el, r = this.rig, ch = this.ch, pose = ch.pose;
     const t = this.timeSec;
     el.style.left = this.x + 'px';
@@ -688,6 +848,10 @@ export class Fighter {
     const nextLean = curLean + (lean - curLean) * Math.min(1, dt * 14);
     r.lean.dataset.lean = nextLean;
     setRot(r.lean, nextLean, 2);
+    if (jitterPx) { // hit-stop victim shake, layered on the lean
+      r.lean.style.transform = `translateX(${jitterPx.toFixed(1)}px) rotate(${nextLean.toFixed(2)}deg)`;
+      r.lean._prevRot = NaN; // force setRot to rewrite next frame
+    }
 
     // ---- Landing squash / impact recoil — rigWrap is otherwise untouched by CSS or JS. ----
     let sx = 1, sy = 1;

@@ -8,3 +8,9 @@ export const GROUND_Y = 392;  // virtual y of the floor line fighters stand on
 export const WORLD_W = 2200;  // total width of the fight world fighters can roam
 export const ARENA_MIN_X = 70;
 export const ARENA_MAX_X = WORLD_W - 70;
+
+// Fixed simulation rate. Every gameplay timer is counted in whole sim frames at this
+// rate (see main.js#stepSim); only rendering runs at the display's own refresh rate.
+export const SIM_HZ = 60;
+export const STEP = 1 / SIM_HZ;
+export const framesFor = seconds => Math.round(seconds * SIM_HZ);

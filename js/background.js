@@ -14,6 +14,12 @@
 // mid tiers with crowd + flags + an ad-board + camera flashes, and a soft bokeh
 // foreground. All motion is SVG SMIL (<animate>/<animateTransform>) so it costs zero
 // per-frame JS — only layer-level pan/zoom (update()) touches the DOM each frame.
+//
+// PERF (Phase 0): SMIL still runs on the main thread, and the old scene had ~1,300
+// never-ending animations. Now each crowd row bobs as one group and only ~10% of fans
+// (plus their flags) animate individually, a third of the stars twinkle, the bokeh uses
+// gradient fills instead of a blur filter, the cheer pulse is one overlay per crowd
+// layer, and setActive(false) pauses everything outside a live match.
 import { WORLD_W, STAGE_W, STAGE_H } from './world.js';
  
 function seeded(seed) {
@@ -28,12 +34,13 @@ const BOKEH_COLORS = ['#ffcf4d', '#ff3b3b', '#2e6bff', '#7fffd4'];
  
 function pick(rand, arr) { return arr[Math.floor(rand() * arr.length)]; }
  
-function armOrFlag(rand, r) {
+function armOrFlag(rand, r, animate) {
   const flagColor = pick(rand, LIGHT_COLORS);
   const side = rand() < 0.5 ? -1 : 1;
   const len = r * (1.6 + rand() * 0.6);
+  const dur = (0.5 + rand() * 0.4).toFixed(2), begin = (rand() * 2).toFixed(2); // always drawn, keeps the seeded scene identical
   return `<g transform="translate(${(side * r * 0.5).toFixed(1)},${(-r * 1.2).toFixed(1)})">` +
-    `<animateTransform attributeName="transform" type="rotate" additive="sum" values="0;${side * 16};0" dur="${(0.5 + rand() * 0.4).toFixed(2)}s" begin="${(rand() * 2).toFixed(2)}s" repeatCount="indefinite"/>` +
+    (animate ? `<animateTransform attributeName="transform" type="rotate" additive="sum" values="0;${side * 16};0" dur="${dur}s" begin="${begin}s" repeatCount="indefinite"/>` : '') +
     `<line x1="0" y1="0" x2="0" y2="${(-len).toFixed(1)}" stroke="#241a30" stroke-width="1"/>` +
     `<polygon points="0,${(-len).toFixed(1)} ${(side * len * 0.7).toFixed(1)},${(-len * 1.3).toFixed(1)} 0,${(-len * 1.6).toFixed(1)}" fill="${flagColor}" opacity=".9"/>` +
     `</g>`;
@@ -51,6 +58,9 @@ function buildCrowdRow(rand, w, y, spacing, r, opts = {}) {
   const arch = opts.arch ?? 0;
   let x = -spacing * 0.5 + rand() * spacing;
   let out = '';
+  // One shared bob for the whole row; ~10% of fans (delay < 0.4 of a 0-4 range, no
+  // extra rand() calls) keep their own bob and flag wave on top of it.
+  const rowDur = (2.2 + (y % 7) * 0.15).toFixed(2);
   while (x < w + spacing) {
     const color = pick(rand, CROWD_COLORS);
     const bob = (0.8 + rand() * 2.5).toFixed(1);
@@ -62,16 +72,23 @@ function buildCrowdRow(rand, w, y, spacing, r, opts = {}) {
     const bulge = arch ? arch * (1 - Math.pow(nx * 2 - 1, 2)) : 0; // parabolic stadium bow
     const rowY = y - bulge;
  
+    const solo = parseFloat(delay) < 0.4;
     out += `<g transform="translate(${(x + parseFloat(xOffset)).toFixed(1)},${(rowY + parseFloat(yOffset)).toFixed(1)})">` +
-      `<animateTransform attributeName="transform" type="translate" additive="sum" values="0,0;0,${-bob};0,0" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` +
+      (solo ? `<animateTransform attributeName="transform" type="translate" additive="sum" values="0,0;0,${-bob};0,0" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` : '') +
       `<circle class="crowdDot" r="${r}" fill="${color}"/>` +
       `<circle class="crowdDot" cy="${(-r * 0.9).toFixed(1)}" r="${(r * 0.55).toFixed(1)}" fill="#e8c39e" opacity=".9"/>` +
-      (rand() < armChance * (0.5 + rand() * 1.5) ? armOrFlag(rand, r) : '') +
+      (rand() < armChance * (0.5 + rand() * 1.5) ? armOrFlag(rand, r, solo) : '') +
       `</g>`;
  
     x += spacing * (0.6 + rand() * 0.9); // irregular spacing increment
   }
-  return out;
+  return `<g><animateTransform attributeName="transform" type="translate" values="0,0;0,-1.4;0,0" dur="${rowDur}s" repeatCount="indefinite"/>${out}</g>`;
+}
+
+// Cheer pulse: one overlay over the crowd band, faded by CSS (.bgLayer.crowdCheer
+// .cheerGlow). Replaces a filter animation on ~2,000 individual crowd circles.
+function buildCheerGlow(w, yTop, yBottom) {
+  return `<rect class="cheerGlow" x="0" y="${yTop.toFixed(1)}" width="${w}" height="${(yBottom - yTop).toFixed(1)}" fill="#ffcf4d" opacity="0"/>`;
 }
  
 // ---- Stacked stadium terrace behind the crowd, for depth/context ----
@@ -97,9 +114,12 @@ function buildSkyLayer(w, h, rand) {
     const r = (0.5 + rand() * 1.3).toFixed(1);
     const dur = (1.6 + rand() * 2.6).toFixed(2);
     const delay = (rand() * 3).toFixed(2);
-    out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="#fff">` +
-      `<animate attributeName="opacity" values="0.15;0.9;0.15" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` +
-      `</circle>`;
+    // A third of the stars twinkle; the rest sit at their mid brightness.
+    out += i % 3 === 0
+      ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="#fff">` +
+        `<animate attributeName="opacity" values="0.15;0.9;0.15" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` +
+        `</circle>`
+      : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="#fff" opacity="0.5"/>`;
   }
   return out;
 }
@@ -177,13 +197,18 @@ function buildFlashes(w, count, rand, yTop, yBottom) {
  
 // ---- Soft blurred foreground bokeh, drifting slowly, sits nearest the camera ----
 function buildBokeh(w, h, rand, count) {
-  let out = `<defs><filter id="bokehBlur" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4.5"/></filter></defs>`;
+  // Soft edges come from a radial gradient per colour (fades to transparent) instead of
+  // an feGaussianBlur filter, which had to be re-rasterised as the circles drifted.
+  let out = '<defs>' + BOKEH_COLORS.map((c, i) =>
+    `<radialGradient id="bokehG${i}"><stop offset="0%" stop-color="${c}" stop-opacity="1"/>` +
+    `<stop offset="55%" stop-color="${c}" stop-opacity="0.75"/><stop offset="100%" stop-color="${c}" stop-opacity="0"/></radialGradient>`).join('') + '</defs>';
   for (let i = 0; i < count; i++) {
     const x = rand() * w, y = h * (0.55 + rand() * 0.45);
-    const r = (8 + rand() * 22).toFixed(1);
+    const r = ((8 + rand() * 22) * 1.35).toFixed(1); // gradient falloff replaces the blur's spread
     const dur = (6 + rand() * 6).toFixed(2);
     const dx = (rand() * 34 - 17).toFixed(1);
-    out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="${pick(rand, BOKEH_COLORS)}" opacity="${(0.05 + rand() * 0.08).toFixed(2)}" filter="url(#bokehBlur)">` +
+    const ci = Math.floor(rand() * BOKEH_COLORS.length);
+    out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="url(#bokehG${ci})" opacity="${(0.05 + rand() * 0.08).toFixed(2)}">` +
       `<animateTransform attributeName="transform" type="translate" values="0,0;${dx},0;0,0" dur="${dur}s" repeatCount="indefinite"/>` +
       `</circle>`;
   }
@@ -206,8 +231,9 @@ export class ParallaxBackground {
     svg.setAttribute('preserveAspectRatio', 'none');
     svg.classList.add('bgLayer');
     svg.style.width = w + 'px';
+    svg.style.transformOrigin = 'center center'; // set once, not every frame
     this.container.appendChild(svg);
-    return { el: svg, factor, width: w };
+    return { el: svg, factor, width: w, tx: NaN, zoom: NaN };
   }
  
   _build() {
@@ -230,6 +256,7 @@ export class ParallaxBackground {
     for (let row = 0; row < 6; row++) {
       farHtml += buildCrowdRow(rFar, far.width, farBaseY - row * 20 - 10, 15, 3.6, { armChance: 0.08, arch: 10 + row * 4 });
     }
+    farHtml += buildCheerGlow(far.width, farBaseY - 6 * 20 - 16, farBaseY);
     far.el.innerHTML = farHtml;
     this.layers.push(far);
  
@@ -241,6 +268,7 @@ export class ParallaxBackground {
     for (let row = 0; row < 5; row++) {
       midHtml += buildCrowdRow(rMid, mid.width, midBaseY - row * 28 - 14, 20, 5.2, { armChance: 0.18, arch: 14 + row * 6 });
     }
+    midHtml += buildCheerGlow(mid.width, midBaseY - 5 * 28 - 20, midBaseY);
     midHtml += buildFlashes(mid.width, 10, seeded(61), midBaseY - 5 * 28 - 40, midBaseY);
     midHtml += buildAdBanner(mid.width, midBaseY - 14, 14, seeded(53)); // frontmost, drawn last so it sits in front of the crowd
     mid.el.innerHTML = midHtml;
@@ -257,11 +285,25 @@ export class ParallaxBackground {
       const shift = (cameraCenterX - WORLD_W / 2) * layer.factor;
       const baseOffset = (layer.width - STAGE_W) / 2;
       const tx = -baseOffset - shift;
-      layer.el.style.transform = `translateX(${tx.toFixed(1)}px) scale(${zoom})`;
-      layer.el.style.transformOrigin = 'center center';
+      // Skip the style write (and the re-raster it triggers) when nothing visibly moved.
+      if (Math.abs(tx - layer.tx) < 0.1 && Math.abs(zoom - layer.zoom) < 0.0005) return;
+      layer.tx = tx; layer.zoom = zoom;
+      layer.el.style.transform = `translateX(${tx.toFixed(1)}px) scale(${zoom.toFixed(4)})`;
     });
   }
  
+  // Pause/resume every SMIL animation in the scene. Off on the select screen, while
+  // paused, and behind the match-result overlay; on during a live match.
+  setActive(on) {
+    if (this.active === on) return;
+    this.active = on;
+    this.layers.forEach(layer => {
+      const svg = layer.el;
+      if (on && svg.unpauseAnimations) svg.unpauseAnimations();
+      else if (!on && svg.pauseAnimations) svg.pauseAnimations();
+    });
+  }
+
   // Crowd "surge" — briefly pulses every layer via the .bgLayer.crowdCheer CSS rule
   // (already defined in style.css, previously never triggered from anywhere).
   // intensity: roughly 0.5 (small reaction) to 3 (KO / match-winning moment).

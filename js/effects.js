@@ -1,18 +1,9 @@
-// js/effects.js — combat juice: hit-stop, procedural particles, blood splatter,
+// js/effects.js — combat juice: procedural particles, blood splatter,
 // motion-blur afterimages. Everything here is DOM+CSS driven, no canvas.
 let fxLayer = null;
-let hitStopTimer = null;
 
 export function initEffects(layerEl) {
   fxLayer = layerEl;
-}
-
-export function triggerHitStop(ms) {
-  if (!ms) return;
-  document.body.classList.add('hitstop');
-  clearTimeout(hitStopTimer);
-  hitStopTimer = setTimeout(() => document.body.classList.remove('hitstop'), ms);
-  return performance.now() + ms;
 }
 
 function spawnEl(cls) {

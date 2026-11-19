@@ -130,6 +130,15 @@ const SFX = {
     crowdSwell(0.55, 0.16 * intensity, 500, 1500);
     applauseBurst(7 + Math.round(5 * intensity), 0.4, 0.12, 0.05);
   },
+  // Match point: a rhythmic two-beat crowd chant ("HEY! HEY!") over a low swell.
+  chant() {
+    crowdSwell(1.4, 0.18, 250, 900);
+    for (let i = 0; i < 4; i++) {
+      const at = i * 0.32;
+      applauseBurst(6, 0.08, 0.12, at);
+      tone(196, 150, 0.16, 'triangle', 0.12, at);
+    }
+  },
   cheer(intensity = 1) {
     const dur = 1.1 + intensity * 0.5;
     crowdSwell(dur, 0.3 * intensity, 300, 1400);

@@ -23,11 +23,14 @@ const DASH_WINDOW = 320;
 let lastTapDir = null;
 let lastTapTime = 0;
 export const dashEvents = []; // { dir: 1|-1 } pushed here, consumed by main.js each frame
+// Gesture queues are capped so taps made during banners or pause can't pile up and
+// fire late; main.js also clears them at every round start (clearInputQueues).
+const MAX_QUEUED_GESTURES = 2;
  
 function noteDirectionTap(dir) {
   const now = performance.now();
   if (lastTapDir === dir && now - lastTapTime < DASH_WINDOW) {
-    dashEvents.push({ dir });
+    if (dashEvents.length < MAX_QUEUED_GESTURES) dashEvents.push({ dir });
     lastTapDir = null; lastTapTime = 0;
   } else {
     lastTapDir = dir; lastTapTime = now;
@@ -94,7 +97,7 @@ function setJoyVert(dir) {
       // Second Up within the window: a flip supersedes a plain jump, so this
       // deliberately does NOT also stamp a jump edge (avoids double-triggering both
       // this direct flip and the existing "second jump while airborne = flip" path).
-      flipEvents.push({ kind: 'front' });
+      if (flipEvents.length < MAX_QUEUED_GESTURES) flipEvents.push({ kind: 'front' });
       lastUpTapTime = 0;
     } else {
       stampPress('jump'); input.jump = true; // first Up behaves like the Jump button
@@ -164,6 +167,9 @@ function initJoystick(root) {
   wrap.addEventListener('lostpointercapture', release);
 }
  
+// Impact haptics: main.js scales the vibration length by hit tier.
+export function haptic(ms) { vibrate(Math.max(1, Math.round(ms))); }
+
 export function initInput(root) {
   // ---- Keyboard ----
   const downMap = {
@@ -250,5 +256,12 @@ export function consumeDash() {
  
 export function consumeFlip() {
   return flipEvents.shift() || null;
+}
+
+// Drop queued gestures and stale button presses (called at each round start).
+export function clearInputQueues() {
+  dashEvents.length = 0;
+  flipEvents.length = 0;
+  pressStamp.punch = pressStamp.kick = pressStamp.jump = 0;
 }
  
