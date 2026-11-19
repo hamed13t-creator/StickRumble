@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v5'; // bump this on every asset-affecting deploy to bust old caches
+const CACHE_VERSION = 'v6'; // bump this on every asset-affecting deploy to bust old caches
 const CACHE_NAME = `stick-rumble-${CACHE_VERSION}`;
 const ASSETS = [
   './',
