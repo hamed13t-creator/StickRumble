@@ -31,8 +31,8 @@ button{ font-family:inherit; }
   aspect-ratio:1; border-radius:10px; border:2px solid #4a3a50; background:#211823;
   display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; padding:2px; gap:1px;
 }
-.charBtn svg{ width:60%; height:70%; }
-.charBtn .cname{ font-size:8px; opacity:.75; letter-spacing:.5px; }
+.charBtn svg{ width:60%; height:70%; color:#4da3ff; }
+.charBtn .cname{ font-size:8px; opacity:.85; letter-spacing:.5px; color:#e9e1f5; }
 .charBtn.sel{ border-color:var(--gold); box-shadow:0 0 10px rgba(255,207,77,.7); }
 .diffRow{ display:flex; gap:8px; }
 .diffBtn{
@@ -105,98 +105,13 @@ button{ font-family:inherit; }
 .platform{ width:60%; height:8px; margin:2px auto 0; border-radius:50%; filter:blur(1px); }
 .fighter.p1 .platform{ background:radial-gradient(ellipse,rgba(46,107,255,.55),transparent 70%); }
 .fighter.p2 .platform{ background:radial-gradient(ellipse,rgba(255,59,59,.55),transparent 70%); }
-.rig{ width:100%; display:block; overflow:visible; filter:drop-shadow(0 4px 5px rgba(0,0,0,.5)); }
-.fighter.p1 .rig{ color:var(--blue); } .fighter.p2 .rig{ color:var(--red); }
+.rig{ width:100%; display:block; overflow:visible; filter:drop-shadow(0 0 4px currentColor); }
+.fighter.p1 .rig{ color:#4da3ff; } .fighter.p2 .rig{ color:#ff4747; }
 
-.armFrontUpper,.armBackUpper{ transform-origin:30px 27px; }
-.armFrontLower{ transform-origin:37px 42px; }
-.armBackLower{ transform-origin:23px 42px; }
-.legFrontUpper,.legBackUpper{ transform-origin:30px 58px; }
-.legFrontLower{ transform-origin:37px 75px; }
-.legBackLower{ transform-origin:24px 75px; }
-.torsoG{ transform-origin:30px 58px; }
 
-@keyframes idleBreathe{
-  0%,100%{ transform:translateY(0) scale(1,1); }
-  50%{ transform:translateY(-1.4px) scale(1.015,0.985); }
-}
-.fighter:not(.jump):not(.flipping):not(.blocking):not(.dashing):not(.hitflash):not(.attack-punch):not(.attack-kick):not(.attack-heavy):not(.attack-lowkick):not(.ko):not(.launched):not(.downed):not(.rolling):not(.wallsplat) .rigWrap{
-  animation:idleBreathe 2.3s ease-in-out infinite;
-}
-
-/* ---- Jump pose (CSS-only tuck; JS handles the actual world height) ---- */
-.fighter.jump .legFrontUpper{ transform:rotate(-30deg); }
-.fighter.jump .legFrontLower{ transform:rotate(46deg); }
-.fighter.jump .legBackUpper{ transform:rotate(24deg); }
-.fighter.jump .legBackLower{ transform:rotate(-38deg); }
-
-/* ---- Block/guard crouch ---- */
-.fighter.blocking .legFrontUpper{ transform:rotate(-14deg); transition:transform .12s ease; }
-.fighter.blocking .legFrontLower{ transform:rotate(20deg); transition:transform .12s ease; }
-.fighter.blocking .legBackUpper{ transform:rotate(10deg); transition:transform .12s ease; }
-.fighter.blocking .legBackLower{ transform:rotate(-16deg); transition:transform .12s ease; }
-.fighter.blocking .armFrontUpper{ transform:rotate(24deg); transition:transform .12s ease; }
-.fighter.blocking .armBackUpper{ transform:rotate(-16deg); transition:transform .12s ease; }
-.fighter.blocking .torsoG{ transform:translateY(5px); transition:transform .12s ease; }
-
-/* ---- Punch / rush: torso lunge only — the arm itself is IK-driven every frame by fighter.js ---- */
-@keyframes punchTorso{
-  0%,100%{ transform:translateX(0) rotate(0deg) scale(1,1); }
-  35%{ transform:translateX(5px) rotate(-8deg) scale(1.05,0.96); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
-  60%{ transform:translateX(2px) rotate(-3deg) scale(1,1); }
-}
-.fighter.attack-punch .torsoG{ animation:punchTorso .3s ease-out; }
-
-@keyframes rushTorso{
-  0%,100%{ transform:translateX(0) rotate(0deg) scale(1,1); }
-  25%{ transform:translateX(10px) rotate(-10deg) scale(1.1,0.92); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
-  60%{ transform:translateX(4px) rotate(-4deg) scale(1,1); }
-}
-.fighter.attack-heavy .torsoG{ animation:rushTorso .34s ease-out; }
-.fighter.attack-heavy .rig{ filter:drop-shadow(0 0 16px var(--gold)) brightness(1.35); }
-
-/* ---- Kick ---- */
-@keyframes kickThigh{
-  0%{ transform:rotate(0deg); }
-  22%{ transform:rotate(34deg); animation-timing-function:cubic-bezier(0.05,0.9,0.1,1.0); }
-  50%{ transform:rotate(-128deg); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
-  75%{ transform:rotate(-96deg); animation-timing-function:ease-out; }
-  100%{ transform:rotate(0deg); }
-}
-@keyframes kickShin{
-  0%{ transform:rotate(0deg); }
-  22%{ transform:rotate(58deg); animation-timing-function:cubic-bezier(0.05,0.9,0.1,1.0); }
-  50%{ transform:rotate(-78deg); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
-  75%{ transform:rotate(-46deg); animation-timing-function:ease-out; }
-  100%{ transform:rotate(0deg); }
-}
-@keyframes kickTorso{
-  0%,100%{ transform:translateX(0) rotate(0deg); }
-  50%{ transform:translateX(7px) rotate(-14deg); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
-  75%{ transform:translateX(2px) rotate(-4deg); }
-}
-.fighter.attack-kick .legFrontUpper{ animation:kickThigh .32s linear; }
-.fighter.attack-kick .legFrontLower{ animation:kickShin .32s linear; }
-.fighter.attack-kick .torsoG{ animation:kickTorso .32s linear; }
-.fighter.attack-kick.aerial .rig{ filter:drop-shadow(0 0 14px var(--gold)) brightness(1.3); }
-
-@keyframes lowThigh{
-  0%{ transform:rotate(-14deg); }
-  30%{ transform:rotate(2deg); animation-timing-function:cubic-bezier(0.05,0.9,0.1,1.0); }
-  55%{ transform:rotate(-62deg); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
-  80%{ transform:rotate(-40deg); animation-timing-function:ease-out; }
-  100%{ transform:rotate(-14deg); }
-}
-@keyframes lowShin{
-  0%{ transform:rotate(20deg); }
-  30%{ transform:rotate(4deg); animation-timing-function:cubic-bezier(0.05,0.9,0.1,1.0); }
-  55%{ transform:rotate(-34deg); animation-timing-function:cubic-bezier(.34,1.56,.64,1); }
-  80%{ transform:rotate(-18deg); animation-timing-function:ease-out; }
-  100%{ transform:rotate(20deg); }
-}
-.fighter.attack-lowkick .legFrontUpper{ animation:lowThigh .3s linear; }
-.fighter.attack-lowkick .legFrontLower{ animation:lowShin .3s linear; }
-.fighter.attack-lowkick .torsoG{ transform:translateY(5px); }
+/* Limb poses, attacks, walking and breathing are animated per frame by js/puppet.js. */
+.fighter.attack-heavy .rig{ filter:drop-shadow(0 0 3px currentColor) drop-shadow(0 0 14px var(--gold)) brightness(1.25); }
+.fighter.attack-kick.aerial .rig{ filter:drop-shadow(0 0 3px currentColor) drop-shadow(0 0 12px var(--gold)) brightness(1.2); }
 
 /* ---- Flip: whole rig spins on its own axis while root motion is handled in JS ---- */
 @keyframes flipFwd{ 0%{ transform:rotate(0deg); } 100%{ transform:rotate(360deg); } }
@@ -210,16 +125,10 @@ button{ font-family:inherit; }
 .fighter.ko .rigWrap{ transform:rotate(var(--fall,90deg)) translateY(10px); transition:transform .4s cubic-bezier(.34,1.2,.64,1); }
 /* ---- Batch 1: knockdown, tech roll, wall splat ---- */
 .fighter.launched .rigWrap{ transform:rotate(calc(var(--fall,-84deg) * .55)); transition:transform .18s ease-out; }
-.fighter.launched .armFrontUpper{ transform:rotate(-120deg); }
-.fighter.launched .armBackUpper{ transform:rotate(-150deg); }
-.fighter.launched .legFrontUpper{ transform:rotate(-25deg); }
-.fighter.launched .legFrontLower{ transform:rotate(30deg); }
 .fighter.downed .rigWrap{ transform:rotate(var(--fall,-84deg)) translateY(12px); transition:transform .12s cubic-bezier(.3,1.4,.6,1); }
 .fighter.rolling .rigWrap{ transform:scale(.8,.72) translateY(14px); transition:transform .08s ease-out; }
 .fighter.rolling .rig{ filter:blur(.6px) drop-shadow(0 0 10px currentColor); }
 .fighter.wallsplat .rigWrap{ transform:rotate(var(--splatTilt,10deg)) scale(.92,1.06); transition:transform .05s ease-out; }
-.fighter.wallsplat .armFrontUpper{ transform:rotate(-100deg); }
-.fighter.wallsplat .armBackUpper{ transform:rotate(100deg); }
 .fighter.wallsplat .rig{ filter:drop-shadow(0 0 12px #fff) brightness(1.4); }
 .afterimage{ opacity:.5; pointer-events:none; z-index:3; transition:opacity .24s linear; }
 
@@ -414,3 +323,77 @@ body.cheering #arenaOuter::after {
   #timer.danger{ animation:none; }
   .arenaWall.on, body.matchpoint #vignette{ animation:none; }
 }
+
+/* ================= Batch 2: street scene, surrounding crowd, heavier effects ================= */
+/* Street surface and blood decals live in the fight world, under the fighters. */
+.streetFloor{ position:absolute; z-index:1; pointer-events:none; }
+.decals{ position:absolute; left:0; top:0; z-index:2; pointer-events:none; }
+.bloodDecal{
+  position:absolute; transform:translate(-50%,-50%) rotate(var(--rot,0deg)); border-radius:50%;
+  background:radial-gradient(ellipse at 45% 45%,#9c0f16 0%,#6d0a10 55%,rgba(80,6,10,.0) 100%);
+  opacity:.85; animation:decalIn .25s ease-out;
+}
+@keyframes decalIn{ from{ transform:translate(-50%,-50%) rotate(var(--rot,0deg)) scale(.2); } }
+
+/* Foreground crowd in front of the fighters + dark spectators framing the edges. */
+#fgLayers{ position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:8; }
+.bgLayer{ will-change:transform; }
+.sideCrowd{ position:absolute; top:0; width:100px; height:480px; overflow:visible; }
+.sideCrowd.left{ left:-22px; } .sideCrowd.right{ right:-22px; }
+
+/* Cheer: rows of fans jump (amplitude set per pulse by background.js). */
+.rowJump{ transform-box:fill-box; }
+.crowdCheer .rowJump{ animation:rowJump .26s ease-in-out 6 alternate; }
+.crowdCheer .rowJump:nth-of-type(2n){ animation-delay:.08s; }
+@keyframes rowJump{ from{ transform:translateY(0); } to{ transform:translateY(var(--cheerAmp,-5px)); } }
+.paused .rowJump{ animation-play-state:paused; }
+
+/* Impact shockwave ring + star flash */
+.impactRing{
+  position:absolute; width:24px; height:24px; margin:-12px 0 0 -12px; border:3px solid #fff; border-radius:50%;
+  pointer-events:none; z-index:9; box-shadow:0 0 12px currentColor; animation:ringOut .32s ease-out forwards;
+}
+@keyframes ringOut{ from{ transform:scale(.3); opacity:1; } to{ transform:scale(calc(3.2 * var(--s,1))); opacity:0; border-width:1px; } }
+.impactStar{
+  position:absolute; width:46px; height:46px; margin:-23px 0 0 -23px; pointer-events:none; z-index:10;
+  background:conic-gradient(from var(--r,0deg),#fff 0 6%,transparent 6% 25%,#fff 25% 31%,transparent 31% 50%,#fff 50% 56%,transparent 56% 75%,#fff 75% 81%,transparent 81%);
+  -webkit-mask:radial-gradient(circle,#000 0 18%,rgba(0,0,0,.8) 30%,transparent 70%); mask:radial-gradient(circle,#000 0 18%,rgba(0,0,0,.8) 30%,transparent 70%);
+  animation:starFlash .18s ease-out forwards;
+}
+@keyframes starFlash{ from{ transform:scale(.4) rotate(0deg); opacity:1; } to{ transform:scale(calc(1.6 * var(--s,1))) rotate(20deg); opacity:0; } }
+
+/* Long blood spray arcs that land on the street */
+.blood.blood-arc{ animation:bloodArc .45s cubic-bezier(.3,0,.7,1) forwards; }
+@keyframes bloodArc{
+  0%{ transform:translate(-50%,-50%) scale(1); opacity:1; }
+  50%{ transform:translate(calc(-50% + var(--dx) * .5),calc(-50% + var(--dy) * .1 - 26px)) scale(1.1); }
+  100%{ transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy))) scale(.6); opacity:.9; }
+}
+
+/* Dust rolling along the floor */
+.dust{
+  position:absolute; width:var(--sz); height:var(--sz); border-radius:50%; pointer-events:none; z-index:6;
+  background:radial-gradient(circle,rgba(205,190,170,.55),rgba(205,190,170,0) 70%);
+  transform:translate(-50%,-50%); animation:dustRoll .7s ease-out forwards;
+}
+@keyframes dustRoll{ to{ transform:translate(calc(-50% + var(--dx)),calc(-50% - 10px)) scale(2.2); opacity:0; } }
+body.hitstop .impactRing, body.hitstop .impactStar, body.hitstop .dust{ animation-play-state:paused !important; }
+
+@media (prefers-reduced-motion: reduce){
+  .crowdCheer .rowJump{ animation:none; }
+  .impactStar{ display:none; }
+}
+
+/* ---- Forced orientation fallback (phones/tablets where the browser can't lock it).
+   main.js sets --vw/--vh to the real viewport size and toggles these classes. ---- */
+body.forceLandscape #gameScreen{
+  position:fixed; inset:auto; top:0; left:var(--vw,100vw);
+  width:var(--vh,100vh); height:var(--vw,100vw);
+  transform:rotate(90deg); transform-origin:top left;
+}
+body.forcePortrait #selectScreen{
+  position:fixed; top:var(--vh,100vh); left:0;
+  width:var(--vh,100vh); height:var(--vw,100vw);
+  transform:rotate(-90deg); transform-origin:top left;
+}
+body.forcePortrait .selectCard{ width:min(94%,480px); max-height:96%; }
