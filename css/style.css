@@ -120,7 +120,7 @@ button{ font-family:inherit; }
   0%,100%{ transform:translateY(0) scale(1,1); }
   50%{ transform:translateY(-1.4px) scale(1.015,0.985); }
 }
-.fighter:not(.jump):not(.flipping):not(.blocking):not(.dashing):not(.hitflash):not(.attack-punch):not(.attack-kick):not(.attack-heavy):not(.attack-lowkick):not(.landing):not(.ko) .rigWrap{
+.fighter:not(.jump):not(.flipping):not(.blocking):not(.dashing):not(.hitflash):not(.attack-punch):not(.attack-kick):not(.attack-heavy):not(.attack-lowkick):not(.ko):not(.launched):not(.downed):not(.rolling):not(.wallsplat) .rigWrap{
   animation:idleBreathe 2.3s ease-in-out infinite;
 }
 
@@ -146,7 +146,6 @@ button{ font-family:inherit; }
   60%{ transform:translateX(2px) rotate(-3deg) scale(1,1); }
 }
 .fighter.attack-punch .torsoG{ animation:punchTorso .3s ease-out; }
-.fighter.ikStretch .armFrontLower{ filter:drop-shadow(0 0 6px currentColor) brightness(1.3); }
 
 @keyframes rushTorso{
   0%,100%{ transform:translateX(0) rotate(0deg) scale(1,1); }
@@ -207,7 +206,21 @@ button{ font-family:inherit; }
 /* ---- Dash trail / hit / KO ---- */
 .fighter.dashing .rig{ filter:blur(1.4px) drop-shadow(0 0 16px currentColor) brightness(1.35) saturate(1.3); }
 .fighter.hitflash .rig{ filter:drop-shadow(0 0 14px #fff) brightness(2); }
-.fighter.ko .rigWrap{ transform:rotate(90deg) translateY(10px); transition:transform .4s cubic-bezier(.34,1.2,.64,1); }
+/* KO and knockdown fall backwards (--fall is set per facing by Fighter.render). */
+.fighter.ko .rigWrap{ transform:rotate(var(--fall,90deg)) translateY(10px); transition:transform .4s cubic-bezier(.34,1.2,.64,1); }
+/* ---- Batch 1: knockdown, tech roll, wall splat ---- */
+.fighter.launched .rigWrap{ transform:rotate(calc(var(--fall,-84deg) * .55)); transition:transform .18s ease-out; }
+.fighter.launched .armFrontUpper{ transform:rotate(-120deg); }
+.fighter.launched .armBackUpper{ transform:rotate(-150deg); }
+.fighter.launched .legFrontUpper{ transform:rotate(-25deg); }
+.fighter.launched .legFrontLower{ transform:rotate(30deg); }
+.fighter.downed .rigWrap{ transform:rotate(var(--fall,-84deg)) translateY(12px); transition:transform .12s cubic-bezier(.3,1.4,.6,1); }
+.fighter.rolling .rigWrap{ transform:scale(.8,.72) translateY(14px); transition:transform .08s ease-out; }
+.fighter.rolling .rig{ filter:blur(.6px) drop-shadow(0 0 10px currentColor); }
+.fighter.wallsplat .rigWrap{ transform:rotate(var(--splatTilt,10deg)) scale(.92,1.06); transition:transform .05s ease-out; }
+.fighter.wallsplat .armFrontUpper{ transform:rotate(-100deg); }
+.fighter.wallsplat .armBackUpper{ transform:rotate(100deg); }
+.fighter.wallsplat .rig{ filter:drop-shadow(0 0 12px #fff) brightness(1.4); }
 .afterimage{ opacity:.5; pointer-events:none; z-index:3; transition:opacity .24s linear; }
 
 .mouthOpen,.mouthNeutral{ transition:opacity .08s; }
@@ -254,6 +267,26 @@ button{ font-family:inherit; }
 
 body.hitstop .fighter, body.hitstop .fighter *,
 body.hitstop .spark, body.hitstop .streak, body.hitstop .blood{ animation-play-state:paused !important; }
+
+/* Sudden-death walls: glowing barriers at the shrinking arena bounds. */
+.arenaWall{
+  position:absolute; top:0; height:392px; width:10px; margin-left:-5px; pointer-events:none; z-index:4; opacity:0;
+  background:linear-gradient(to bottom,transparent,rgba(255,59,59,.85) 35%,#ff3b3b);
+  box-shadow:0 0 18px 4px rgba(255,59,59,.6); border-radius:5px; transition:opacity .4s;
+}
+.arenaWall.on{ opacity:1; animation:wallPulse .8s ease-in-out infinite alternate; }
+@keyframes wallPulse{ from{ box-shadow:0 0 12px 2px rgba(255,59,59,.5); } to{ box-shadow:0 0 26px 7px rgba(255,90,60,.85); } }
+#timer.danger{ color:#ff4d4d; text-shadow:0 0 12px rgba(255,59,59,.9); animation:timerThrob 1s ease-in-out infinite; }
+@keyframes timerThrob{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.18); } }
+
+/* Match point: a red vignette closes in on the stage. */
+#vignette{
+  position:absolute; inset:0; pointer-events:none; z-index:11; opacity:0; transition:opacity .8s;
+  background:radial-gradient(ellipse at center,transparent 55%,rgba(120,0,10,.55) 100%);
+}
+body.matchpoint #vignette{ opacity:1; animation:vignetteBeat 1.6s ease-in-out infinite; }
+body.suddendeath #vignette{ opacity:1; animation-duration:.8s; }
+@keyframes vignetteBeat{ 0%,100%{ opacity:.75; } 50%{ opacity:1; } }
 
 #koFlash{ position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:12; }
 #koFlash.show{ animation:koFlashFade .45s ease-out; }
@@ -349,15 +382,14 @@ body.hitstop .spark, body.hitstop .streak, body.hitstop .blood{ animation-play-s
 
 /* ================= Upgrades ================= */
 
-/* Crowd cheer pulse effect — scoped to .crowdDot (buildCrowdRow's body/head circles)
-   only. Was a bare `circle` selector, which also matched stars, marquee bulbs, and
-   bokeh across all 5 background layers (150-300+ elements) every time pulse() fired. */
-.bgLayer.crowdCheer .crowdDot {
+/* Crowd cheer pulse — one gold overlay per crowd layer (background.js buildCheerGlow)
+   fades in and out. Replaces a brightness filter animated on ~2,000 crowd circles. */
+.bgLayer.crowdCheer .cheerGlow {
   animation: crowdPulse 1.2s ease-in-out infinite;
 }
 @keyframes crowdPulse {
-  0%,100% { filter:brightness(1); }
-  50% { filter:brightness(1.4) saturate(1.2); }
+  0%,100% { opacity:0; }
+  50% { opacity:.14; }
 }
 
 /* Cheer overlay glow */
@@ -372,4 +404,13 @@ body.cheering #arenaOuter::after {
   0% { opacity:0; }
   50% { opacity:1; }
   100% { opacity:0; }
+}
+
+/* ---- prefers-reduced-motion: keep the information, drop the shaking and flashing.
+   main.js also halves camera shake/kick and hit-stop jitter and skips the KO flash. ---- */
+@media (prefers-reduced-motion: reduce){
+  #banner.show, #banner.show.ko{ animation:none; transform:none; }
+  #koFlash.show{ animation:none; }
+  #timer.danger{ animation:none; }
+  .arenaWall.on, body.matchpoint #vignette{ animation:none; }
 }
