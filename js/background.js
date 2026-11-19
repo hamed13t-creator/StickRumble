@@ -1,318 +1,344 @@
-// js/background.js — chaotic night arena crowd with shuffled supporters.
+// js/background.js — the street-fight scene around the fighters.
 //
-// BUGFIX: the previous version of this file called buildTierBackdrop(), a function
-// that was never defined anywhere in the codebase — a stray comment even said
-// "keep your existing buildTierBackdrop, buildSpotlightRig, buildMarquee, buildBanner,
-// buildFlashes" as if those already existed, but none of them did. Since _build() runs
-// synchronously from the constructor, and `new ParallaxBackground(...)` runs at
-// main.js's top-level module init, this threw a ReferenceError before any other game
-// code could run — the entire game failed to boot, not just the background. Every
-// helper below is now actually implemented.
+// Batch 2: the stadium became a night-time street. From back to front:
+//   1. sky with a moon and a few stars
+//   2. city skyline with lit windows and neon signs
+//   3. brick alley wall with graffiti, a chain-link fence, streetlights, and a far
+//      crowd standing along the wall
+//   4. the near street crowd (three rows of standing, cheering people) with burning
+//      oil drums
+//   5. (world) the asphalt street itself, drawn in the fight world by main.js
+//   6. a FOREGROUND crowd in front of the fighters (backs of heads, raised fists), so
+//      the fight is surrounded on both sides like a street circle, plus dark clusters
+//      of spectators framing the left and right screen edges.
 //
-// Five parallax layers, matching the intended scene: night sky/stars, a spotlight
-// truss with sweeping beam cones, far stadium tiers with crowd + the marquee sign,
-// mid tiers with crowd + flags + an ad-board + camera flashes, and a soft bokeh
-// foreground. All motion is SVG SMIL (<animate>/<animateTransform>) so it costs zero
-// per-frame JS — only layer-level pan/zoom (update()) touches the DOM each frame.
-//
-// PERF (Phase 0): SMIL still runs on the main thread, and the old scene had ~1,300
-// never-ending animations. Now each crowd row bobs as one group and only ~10% of fans
-// (plus their flags) animate individually, a third of the stars twinkle, the bokeh uses
-// gradient fills instead of a blur filter, the cheer pulse is one overlay per crowd
-// layer, and setActive(false) pauses everything outside a live match.
+// All crowd motion is SVG SMIL or CSS, so it costs no per-frame JS; only the layer pan
+// and zoom (update()) touch the DOM each frame. setActive(false) pauses everything
+// outside a live match. This file is render-only: nothing here touches the simulation.
 import { WORLD_W, STAGE_W, STAGE_H } from './world.js';
- 
+
 function seeded(seed) {
   let s = seed;
   return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
 }
- 
-const CROWD_COLORS = ['#3f7bff', '#ff5c5c', '#ffcf4d', '#7fffd4', '#c97b3d', '#a86bff', '#ff8fd1', '#5ce1ff'];
-const LIGHT_COLORS = ['#2e6bff', '#ff3b3b', '#ffcf4d', '#a86bff', '#7fffd4'];
-const AD_COLORS = ['#2e6bff', '#ff3b3b', '#ffcf4d', '#7fffd4', '#a86bff'];
-const BOKEH_COLORS = ['#ffcf4d', '#ff3b3b', '#2e6bff', '#7fffd4'];
- 
 function pick(rand, arr) { return arr[Math.floor(rand() * arr.length)]; }
- 
-function armOrFlag(rand, r, animate) {
-  const flagColor = pick(rand, LIGHT_COLORS);
-  const side = rand() < 0.5 ? -1 : 1;
-  const len = r * (1.6 + rand() * 0.6);
-  const dur = (0.5 + rand() * 0.4).toFixed(2), begin = (rand() * 2).toFixed(2); // always drawn, keeps the seeded scene identical
-  return `<g transform="translate(${(side * r * 0.5).toFixed(1)},${(-r * 1.2).toFixed(1)})">` +
-    (animate ? `<animateTransform attributeName="transform" type="rotate" additive="sum" values="0;${side * 16};0" dur="${dur}s" begin="${begin}s" repeatCount="indefinite"/>` : '') +
-    `<line x1="0" y1="0" x2="0" y2="${(-len).toFixed(1)}" stroke="#241a30" stroke-width="1"/>` +
-    `<polygon points="0,${(-len).toFixed(1)} ${(side * len * 0.7).toFixed(1)},${(-len * 1.3).toFixed(1)} 0,${(-len * 1.6).toFixed(1)}" fill="${flagColor}" opacity=".9"/>` +
-    `</g>`;
-}
- 
-// ---- Chaotic crowd row builder ----
-// `arch` bows the row into a shallow parabola — highest at row-center, tapering to 0 at
-// the row's outer edges — instead of a flat horizontal line. Layering several rows with
-// increasing arch (see _build()) approximates concentric stadium tiers curving up and
-// around the ring, within this game's flat side-scrolling parallax-layer architecture
-// (true 360° wrap-around would need a 3D/perspective renderer, out of scope for the
-// pure-SVG constraint this project is built on).
-function buildCrowdRow(rand, w, y, spacing, r, opts = {}) {
-  const armChance = opts.armChance ?? 0;
-  const arch = opts.arch ?? 0;
-  let x = -spacing * 0.5 + rand() * spacing;
-  let out = '';
-  // One shared bob for the whole row; ~10% of fans (delay < 0.4 of a 0-4 range, no
-  // extra rand() calls) keep their own bob and flag wave on top of it.
-  const rowDur = (2.2 + (y % 7) * 0.15).toFixed(2);
-  while (x < w + spacing) {
-    const color = pick(rand, CROWD_COLORS);
-    const bob = (0.8 + rand() * 2.5).toFixed(1);
-    const dur = (1.5 + rand() * 3.5).toFixed(2);
-    const delay = (rand() * 4).toFixed(2);
-    const yOffset = (rand() * 6 - 3).toFixed(1);   // vertical shuffle
-    const xOffset = (rand() * 8 - 4).toFixed(1);   // horizontal shuffle
-    const nx = Math.max(0, Math.min(1, x / w));      // normalized position across the row
-    const bulge = arch ? arch * (1 - Math.pow(nx * 2 - 1, 2)) : 0; // parabolic stadium bow
-    const rowY = y - bulge;
- 
-    const solo = parseFloat(delay) < 0.4;
-    out += `<g transform="translate(${(x + parseFloat(xOffset)).toFixed(1)},${(rowY + parseFloat(yOffset)).toFixed(1)})">` +
-      (solo ? `<animateTransform attributeName="transform" type="translate" additive="sum" values="0,0;0,${-bob};0,0" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` : '') +
-      `<circle class="crowdDot" r="${r}" fill="${color}"/>` +
-      `<circle class="crowdDot" cy="${(-r * 0.9).toFixed(1)}" r="${(r * 0.55).toFixed(1)}" fill="#e8c39e" opacity=".9"/>` +
-      (rand() < armChance * (0.5 + rand() * 1.5) ? armOrFlag(rand, r, solo) : '') +
-      `</g>`;
- 
-    x += spacing * (0.6 + rand() * 0.9); // irregular spacing increment
+const f1 = n => n.toFixed(1);
+
+const CLOTHES = ['#2a3550', '#4a2633', '#2f4030', '#4a3d22', '#3a2a4f', '#24343f', '#51302a', '#30303a'];
+const SKIN = ['#e8c39e', '#c99a6e', '#8d5a3b', '#f1d0b0', '#a8734f', '#5e3a26'];
+const NEON = ['#ff3b6b', '#2ee6ff', '#ffcf4d', '#a86bff', '#4dff9a'];
+
+// ---- One standing spectator (facing the fight). armsUp: 0 none, 1 one fist, 2 both.
+// animate: give this one their own fist-pump / bounce on top of the row's sway.
+function person(rand, x, y, sc, opts = {}) {
+  const shirt = opts.dark ? '#08070c' : pick(rand, CLOTHES);
+  const skin = opts.dark ? '#0b0a10' : pick(rand, SKIN);
+  const arms = opts.arms ?? (rand() < 0.35 ? (rand() < 0.4 ? 2 : 1) : 0);
+  const sw = 13 * sc, sh = 22 * sc, hr = 5.4 * sc;
+  const lean = (rand() * 8 - 4).toFixed(1);
+  const rim = opts.rim ? `stroke="${opts.rim}" stroke-width="${f1(1.2 * sc)}" stroke-opacity=".55"` : '';
+  let body = `<path d="M${f1(-sw / 2)},0 Q${f1(-sw / 2 - 1 * sc)},${f1(-sh * 0.7)} ${f1(-sw * 0.32)},${f1(-sh)} L${f1(sw * 0.32)},${f1(-sh)} Q${f1(sw / 2 + 1 * sc)},${f1(-sh * 0.7)} ${f1(sw / 2)},0 Z" fill="${shirt}" ${rim}/>` +
+    `<circle cy="${f1(-sh - hr * 0.9)}" r="${f1(hr)}" fill="${skin}" ${rim}/>`;
+  if (!opts.dark && rand() < 0.3) body += `<path d="M${f1(-hr)},${f1(-sh - hr * 1.2)} a${f1(hr)},${f1(hr * 0.9)} 0 0 1 ${f1(hr * 2)},0 Z" fill="${pick(rand, ['#111', '#3a2618', '#d8d8d8', '#7a1f1f'])}"/>`; // cap / hair
+  let armsSvg = '';
+  const armW = f1(3.4 * sc);
+  const armCol = opts.dark ? '#08070c' : shirt;
+  for (let i = 0; i < arms; i++) {
+    const side = arms === 2 ? (i === 0 ? -1 : 1) : (rand() < 0.5 ? -1 : 1);
+    const sx = side * sw * 0.36, sy = -sh * 0.92;
+    const ex = sx + side * 4 * sc, ey = sy - 10 * sc, hx = sx + side * 2 * sc, hy = sy - 20 * sc;
+    const pump = opts.animate
+      ? `<animateTransform attributeName="transform" type="rotate" values="0 ${f1(sx)} ${f1(sy)};${side * 14} ${f1(sx)} ${f1(sy)};0 ${f1(sx)} ${f1(sy)}" dur="${(0.42 + rand() * 0.3).toFixed(2)}s" begin="${(rand() * 1.5).toFixed(2)}s" repeatCount="indefinite"/>` : '';
+    armsSvg += `<g>${pump}<path d="M${f1(sx)},${f1(sy)} Q${f1(ex)},${f1(ey)} ${f1(hx)},${f1(hy)}" stroke="${armCol}" stroke-width="${armW}" stroke-linecap="round" fill="none"/>` +
+      `<circle cx="${f1(hx)}" cy="${f1(hy)}" r="${f1(2.6 * sc)}" fill="${skin}"/></g>`;
   }
-  return `<g><animateTransform attributeName="transform" type="translate" values="0,0;0,-1.4;0,0" dur="${rowDur}s" repeatCount="indefinite"/>${out}</g>`;
+  const bounce = opts.animate
+    ? `<animateTransform attributeName="transform" type="translate" additive="sum" values="0,0;0,${f1(-3 * sc)};0,0" dur="${(0.5 + rand() * 0.4).toFixed(2)}s" begin="${(rand() * 1.2).toFixed(2)}s" repeatCount="indefinite"/>` : '';
+  return `<g transform="translate(${f1(x)},${f1(y)}) rotate(${lean})">${bounce}${armsSvg}${body}</g>`;
 }
 
-// Cheer pulse: one overlay over the crowd band, faded by CSS (.bgLayer.crowdCheer
-// .cheerGlow). Replaces a filter animation on ~2,000 individual crowd circles.
-function buildCheerGlow(w, yTop, yBottom) {
-  return `<rect class="cheerGlow" x="0" y="${yTop.toFixed(1)}" width="${w}" height="${(yBottom - yTop).toFixed(1)}" fill="#ffcf4d" opacity="0"/>`;
+// A row of people. The row sways as one group; ~15% of people pump their fists solo.
+// The outer <g class="rowJump"> is what the CSS cheer animation moves.
+function crowdRow(rand, w, y, spacing, sc, opts = {}) {
+  let out = '', x = rand() * spacing * 0.5;
+  while (x < w + spacing) {
+    out += person(rand, x + (rand() * 6 - 3), y + (rand() * 4 - 2) * sc, sc * (0.9 + rand() * 0.2),
+      { ...opts, animate: rand() < (opts.solo ?? 0.15) });
+    x += spacing * (0.55 + rand() * 0.7);
+  }
+  const dur = (2 + (y % 5) * 0.2).toFixed(2);
+  return `<g class="rowJump"><g><animateTransform attributeName="transform" type="translate" values="0,0;${f1(1.5 * sc)},${f1(-1.2 * sc)};0,0" dur="${dur}s" repeatCount="indefinite"/>${out}</g></g>`;
 }
- 
-// ---- Stacked stadium terrace behind the crowd, for depth/context ----
-function buildTierBackdrop(w, baseY, tiers, tierH, colorA, colorB) {
-  let out = '';
-  for (let i = 0; i < tiers; i++) {
-    const y = baseY - (i + 1) * tierH;
-    out += `<rect x="0" y="${y.toFixed(1)}" width="${w}" height="${tierH}" fill="${i % 2 === 0 ? colorA : colorB}"/>` +
-      `<rect x="0" y="${y.toFixed(1)}" width="${w}" height="2" fill="#000" opacity=".18"/>`;
+
+function cheerGlow(w, yTop, yBottom) {
+  return `<rect class="cheerGlow" x="0" y="${f1(yTop)}" width="${w}" height="${f1(yBottom - yTop)}" fill="#ffb347" opacity="0"/>`;
+}
+
+// ---- 1. Sky ----
+function skyLayer(w, h, rand) {
+  let out = `<defs><linearGradient id="skyG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#070812"/><stop offset="60%" stop-color="#151127"/><stop offset="100%" stop-color="#2a1830"/></linearGradient>` +
+    `<radialGradient id="moonG"><stop offset="0%" stop-color="#fff6dc" stop-opacity=".9"/><stop offset="35%" stop-color="#ffe9b8" stop-opacity=".25"/><stop offset="100%" stop-color="#ffe9b8" stop-opacity="0"/></radialGradient></defs>` +
+    `<rect width="${w}" height="${h}" fill="url(#skyG)"/>`;
+  out += `<circle cx="${f1(w * 0.72)}" cy="62" r="70" fill="url(#moonG)"/><circle cx="${f1(w * 0.72)}" cy="62" r="17" fill="#f7eccd"/>`;
+  for (let i = 0; i < w / 22; i++) {
+    const x = rand() * w, y = rand() * h * 0.4;
+    out += i % 4 === 0
+      ? `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(0.5 + rand())}" fill="#fff"><animate attributeName="opacity" values=".2;.9;.2" dur="${(2 + rand() * 3).toFixed(2)}s" repeatCount="indefinite"/></circle>`
+      : `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(0.4 + rand() * 0.8)}" fill="#fff" opacity=".45"/>`;
   }
   return out;
 }
- 
-// ---- Night sky: gradient + twinkling stars ----
-function buildSkyLayer(w, h, rand) {
-  const starCount = Math.round(w / 14);
-  let out = `<defs><linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">` +
-    `<stop offset="0%" stop-color="#150f1f"/><stop offset="55%" stop-color="#1e1628"/><stop offset="100%" stop-color="#241a30"/>` +
-    `</linearGradient></defs>` +
-    `<rect x="0" y="0" width="${w}" height="${h}" fill="url(#skyGrad)"/>`;
-  for (let i = 0; i < starCount; i++) {
-    const x = rand() * w, y = rand() * h * 0.6;
-    const r = (0.5 + rand() * 1.3).toFixed(1);
-    const dur = (1.6 + rand() * 2.6).toFixed(2);
-    const delay = (rand() * 3).toFixed(2);
-    // A third of the stars twinkle; the rest sit at their mid brightness.
-    out += i % 3 === 0
-      ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="#fff">` +
-        `<animate attributeName="opacity" values="0.15;0.9;0.15" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` +
-        `</circle>`
-      : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="#fff" opacity="0.5"/>`;
-  }
-  return out;
-}
- 
-// ---- Overhead rigging truss with slowly sweeping spotlight beam cones ----
-function buildTrussLayer(w, h, rand) {
-  const trussY = h * 0.1;
-  let out = `<line x1="0" y1="${trussY.toFixed(1)}" x2="${w}" y2="${trussY.toFixed(1)}" stroke="#1a1420" stroke-width="6"/>`;
-  const step = 42;
-  for (let x = 0; x < w; x += step) {
-    out += `<line x1="${x}" y1="${(trussY - 6).toFixed(1)}" x2="${x + step}" y2="${(trussY + 6).toFixed(1)}" stroke="#241a30" stroke-width="2"/>` +
-      `<line x1="${x}" y1="${(trussY + 6).toFixed(1)}" x2="${x + step}" y2="${(trussY - 6).toFixed(1)}" stroke="#241a30" stroke-width="2"/>`;
-  }
-  const count = Math.max(1, Math.round(w / 220));
-  for (let i = 0; i < count; i++) {
-    const x = (i + 0.5) * (w / count);
-    const base = (rand() * 10 - 5);
-    const dur = (3 + rand() * 2.5).toFixed(2);
-    out += `<g transform="translate(${x.toFixed(1)},${trussY.toFixed(1)})">` +
-      `<rect x="-7" y="-2" width="14" height="11" rx="2" fill="#2c2038"/>` +
-      `<g>` +
-      `<animateTransform attributeName="transform" type="rotate" values="${(base - 15).toFixed(1)};${(base + 15).toFixed(1)};${(base - 15).toFixed(1)}" dur="${dur}s" repeatCount="indefinite"/>` +
-      `<polygon points="-4,9 4,9 58,160 -58,160" fill="#fff2c4" opacity=".045"/>` +
-      `</g></g>`;
-  }
-  return out;
-}
- 
-// ---- Neon marquee sign with a chase-lit bulb strip ----
-function buildMarquee(w, y) {
-  const cx = w / 2, signW = Math.min(440, w * 0.42), signH = 46;
-  const bulbCount = Math.max(8, Math.round(signW / 18));
-  let bulbs = '';
-  for (let i = 0; i < bulbCount; i++) {
-    const t = i / (bulbCount - 1);
-    const bx = cx - signW / 2 + t * signW;
-    const dur = 1.2;
-    const delay = (i * (dur / bulbCount)).toFixed(2);
-    bulbs += `<circle cx="${bx.toFixed(1)}" cy="${(y - signH - 6).toFixed(1)}" r="2.4" fill="#ffcf4d">` +
-      `<animate attributeName="opacity" values="0.22;1;0.22" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` +
-      `</circle>`;
-  }
-  return `<g>` +
-    `<rect x="${(cx - signW / 2).toFixed(1)}" y="${(y - signH).toFixed(1)}" width="${signW.toFixed(1)}" height="${signH}" rx="6" fill="#1a1420" stroke="#3a2a3f" stroke-width="2"/>` +
-    `<text x="${cx.toFixed(1)}" y="${(y - signH / 2 + 7).toFixed(1)}" text-anchor="middle" font-family="Trebuchet MS, Segoe UI, sans-serif" font-weight="900" font-size="21" letter-spacing="3" fill="#ff3b3b" stroke="#ffcf4d" stroke-width="0.6">STICK RUMBLE</text>` +
-    bulbs + `</g>`;
-}
- 
-// ---- Ringside ad barricade: abstract sponsor-style color blocks, no real branding ----
-function buildAdBanner(w, y, h, rand) {
-  let out = `<rect x="0" y="${y.toFixed(1)}" width="${w}" height="${h}" fill="#12101a"/>`;
-  const blockW = 68;
-  let x = 0;
+
+// ---- 2. Skyline ----
+function skylineLayer(w, h, rand) {
+  let out = '', x = -10;
+  const base = 300;
   while (x < w) {
-    out += `<rect x="${x}" y="${(y + h * 0.16).toFixed(1)}" width="${blockW - 6}" height="${(h * 0.68).toFixed(1)}" rx="3" fill="${pick(rand, AD_COLORS)}" opacity=".55"/>`;
-    x += blockW;
+    const bw = 40 + rand() * 70, bh = 70 + rand() * 170;
+    const top = base - bh;
+    out += `<rect x="${f1(x)}" y="${f1(top)}" width="${f1(bw)}" height="${f1(bh + 200)}" fill="${rand() < 0.5 ? '#0f0c1a' : '#141022'}"/>`;
+    if (rand() < 0.3) out += `<rect x="${f1(x + bw * 0.45)}" y="${f1(top - 18)}" width="2" height="18" fill="#0f0c1a"/><circle cx="${f1(x + bw * 0.45 + 1)}" cy="${f1(top - 19)}" r="1.6" fill="#ff3b3b"><animate attributeName="opacity" values="1;.1;1" dur="1.6s" repeatCount="indefinite"/></circle>`;
+    for (let wy = top + 8; wy < base - 6; wy += 11) {
+      for (let wx = x + 5; wx < x + bw - 6; wx += 9) {
+        if (rand() < 0.28) out += `<rect x="${f1(wx)}" y="${f1(wy)}" width="4" height="5" fill="${rand() < 0.8 ? '#ffd27a' : '#7ad0ff'}" opacity="${(0.35 + rand() * 0.5).toFixed(2)}"/>`;
+      }
+    }
+    if (rand() < 0.18) {
+      const c = pick(rand, NEON);
+      out += `<rect x="${f1(x + 6)}" y="${f1(top + 14)}" width="${f1(Math.min(46, bw - 12))}" height="13" rx="2" fill="none" stroke="${c}" stroke-width="2" opacity=".85"><animate attributeName="opacity" values=".85;.85;.2;.85;.85" keyTimes="0;.9;.92;.94;1" dur="${(3 + rand() * 4).toFixed(2)}s" repeatCount="indefinite"/></rect>`;
+    }
+    x += bw + rand() * 6;
   }
+  // haze at the street level
+  out += `<defs><linearGradient id="hazeG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3a1f3a" stop-opacity="0"/><stop offset="100%" stop-color="#3a1f3a" stop-opacity=".7"/></linearGradient></defs><rect x="0" y="200" width="${w}" height="${h - 200}" fill="url(#hazeG)"/>`;
   return out;
 }
- 
-// ---- Scattered photographer camera-flash sparkles among the mid crowd ----
-function buildFlashes(w, count, rand, yTop, yBottom) {
+
+// ---- 3. Alley wall, graffiti, fence, streetlights, far crowd ----
+function alleyLayer(w, h, rand) {
+  const top = 168, base = 352;
+  let out = `<defs>
+    <pattern id="brick" width="28" height="14" patternUnits="userSpaceOnUse">
+      <rect width="28" height="14" fill="#3a1d1e"/><path d="M0,0H28M0,7H28M0,14H28M7,0V7M21,7V14" stroke="#24110f" stroke-width="1.6"/>
+      <rect x="1" y="1" width="5" height="5" fill="#4a2624" opacity=".5"/><rect x="15" y="8" width="5" height="5" fill="#2e1515" opacity=".6"/>
+    </pattern>
+    <pattern id="fence" width="12" height="12" patternUnits="userSpaceOnUse"><path d="M0,0L12,12M12,0L0,12" stroke="#8a8f99" stroke-width="0.8" opacity=".5"/></pattern>
+    <linearGradient id="wallShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000" stop-opacity=".75"/><stop offset="70%" stop-color="#000" stop-opacity=".25"/><stop offset="100%" stop-color="#000" stop-opacity=".55"/></linearGradient>
+    <radialGradient id="lampG" cx="50%" cy="0%" r="100%"><stop offset="0%" stop-color="#ffd58a" stop-opacity=".42"/><stop offset="100%" stop-color="#ffd58a" stop-opacity="0"/></radialGradient>
+  </defs>`;
+  out += `<rect x="0" y="${top}" width="${w}" height="${h - top}" fill="url(#brick)"/>`;
+  // doorways / roller shutters break up the wall
+  for (let x = 120; x < w; x += 260 + rand() * 200) {
+    out += `<rect x="${f1(x)}" y="${top + 60}" width="70" height="${base - top - 60}" fill="#161219"/>` +
+      Array.from({ length: 9 }, (_, i) => `<line x1="${f1(x)}" x2="${f1(x + 70)}" y1="${top + 66 + i * 13}" y2="${top + 66 + i * 13}" stroke="#2a2430" stroke-width="2"/>`).join('');
+  }
+  // graffiti tags (generic, original)
+  const tags = ['RUMBLE', 'STREET', 'K.O.', 'FIGHT!', 'NO RULES', '1 v 1'];
+  for (let x = 60; x < w; x += 190 + rand() * 160) {
+    const c = pick(rand, NEON);
+    out += `<text x="${f1(x)}" y="${f1(top + 40 + rand() * 50)}" transform="rotate(${(rand() * 10 - 5).toFixed(1)} ${f1(x)} ${top + 60})" font-family="Impact, 'Arial Black', sans-serif" font-size="${f1(20 + rand() * 16)}" font-style="italic" fill="none" stroke="${c}" stroke-width="2.2" opacity=".75" letter-spacing="1">${pick(rand, tags)}</text>`;
+    if (rand() < 0.5) out += `<path d="M${f1(x + 10)},${f1(top + 90)} q20,-14 40,0 t40,0" fill="none" stroke="${pick(rand, NEON)}" stroke-width="3" opacity=".5" stroke-linecap="round"/>`;
+  }
+  out += `<rect x="0" y="${top}" width="${w}" height="${h - top}" fill="url(#wallShade)"/>`;
+  // chain-link fence segments
+  for (let x = 0; x < w; x += 420) {
+    out += `<rect x="${f1(x + 220)}" y="${base - 90}" width="160" height="90" fill="url(#fence)"/><rect x="${f1(x + 218)}" y="${base - 92}" width="164" height="3" fill="#6b707a" opacity=".6"/>` +
+      `<rect x="${f1(x + 218)}" y="${base - 92}" width="3" height="92" fill="#6b707a" opacity=".6"/><rect x="${f1(x + 379)}" y="${base - 92}" width="3" height="92" fill="#6b707a" opacity=".6"/>`;
+  }
+  // streetlights with flickering cones
+  for (let x = 90; x < w; x += 330) {
+    const flick = rand() < 0.35;
+    out += `<rect x="${x}" y="${top - 20}" width="4" height="${base - top + 20}" fill="#1a171f"/><path d="M${x + 2},${top - 18} q0,-14 22,-14" stroke="#1a171f" stroke-width="4" fill="none"/>` +
+      `<rect x="${x + 16}" y="${top - 36}" width="18" height="6" rx="2" fill="#2a2630"/><circle cx="${x + 25}" cy="${top - 29}" r="3" fill="#ffe2a6"/>` +
+      `<polygon points="${x + 17},${top - 29} ${x + 33},${top - 29} ${x + 95},${base} ${x - 45},${base}" fill="url(#lampG)">` +
+      (flick ? `<animate attributeName="opacity" values="1;1;.3;1;.5;1" keyTimes="0;.8;.83;.86;.9;1" dur="${(4 + rand() * 3).toFixed(2)}s" repeatCount="indefinite"/>` : '') + `</polygon>`;
+  }
+  // far crowd standing along the wall
+  out += crowdRow(rand, w, base - 2, 13, 0.62, { solo: 0.08 });
+  out += crowdRow(rand, w, base + 8, 14, 0.7, { solo: 0.1 });
+  out += cheerGlow(w, base - 40, base + 10);
+  return out;
+}
+
+// ---- 4. Near street crowd with burning oil drums ----
+function streetCrowdLayer(w, h, rand) {
+  const base = 405;
+  let out = `<defs><radialGradient id="fireG"><stop offset="0%" stop-color="#ffb347" stop-opacity=".55"/><stop offset="100%" stop-color="#ff5a1f" stop-opacity="0"/></radialGradient></defs>`;
+  const drums = [];
+  for (let x = 160; x < w; x += 380 + rand() * 260) drums.push(x);
+  // fire glow first (behind people)
+  for (const x of drums) out += `<circle cx="${f1(x)}" cy="${base - 40}" r="90" fill="url(#fireG)"><animate attributeName="opacity" values=".8;1;.7;.95;.8" dur="1.3s" repeatCount="indefinite"/></circle>`;
+  out += crowdRow(rand, w, base - 26, 24, 1.15, { solo: 0.18, rim: '#ff9a52' });
+  out += crowdRow(rand, w, base - 12, 26, 1.3, { solo: 0.2, rim: '#ff9a52' });
+  for (const x of drums) {
+    out += `<rect x="${f1(x - 13)}" y="${base - 34}" width="26" height="34" rx="2" fill="#2b2f36" stroke="#14161a" stroke-width="2"/>` +
+      `<line x1="${f1(x - 13)}" x2="${f1(x + 13)}" y1="${base - 24}" y2="${base - 24}" stroke="#14161a" stroke-width="2"/><line x1="${f1(x - 13)}" x2="${f1(x + 13)}" y1="${base - 11}" y2="${base - 11}" stroke="#14161a" stroke-width="2"/>`;
+    for (let i = 0; i < 3; i++) {
+      const fx = x - 7 + i * 7, fh = 16 + rand() * 10;
+      out += `<path d="M${f1(fx - 5)},${base - 34} Q${f1(fx)},${f1(base - 34 - fh * 1.6)} ${f1(fx + 5)},${base - 34} Z" fill="${i === 1 ? '#ffd166' : '#ff6a2b'}" opacity=".9">` +
+        `<animateTransform attributeName="transform" type="scale" values="1 1;1.08 0.8;0.95 1.15;1 1" additive="sum" dur="${(0.35 + rand() * 0.25).toFixed(2)}s" repeatCount="indefinite"/></path>`;
+    }
+  }
+  out += cheerGlow(w, base - 90, base);
+  return out;
+}
+
+// ---- 6a. Foreground crowd in front of the fight (big, dark, backlit) ----
+function foregroundLayer(w, h, rand) {
   let out = '';
-  for (let i = 0; i < count; i++) {
-    const x = rand() * w;
-    const y = yTop + rand() * (yBottom - yTop);
-    const delay = (rand() * 6).toFixed(2);
-    const dur = (3 + rand() * 3).toFixed(2);
-    out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#fff" opacity="0">` +
-      `<animate attributeName="opacity" values="0;0;0.9;0;0" keyTimes="0;0.93;0.955;0.98;1" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>` +
-      `</circle>`;
+  out += crowdRow(rand, w, h + 40, 52, 2.5, { dark: true, rim: '#ffb07a', solo: 0.3 });
+  out += crowdRow(rand, w, h + 72, 66, 3.1, { dark: true, rim: '#ff8a5c', solo: 0.2, arms: 0 });
+  return out;
+}
+
+// ---- 6b. Spectators framing the screen edges (screen-fixed) ----
+function sideCluster(rand, side) {
+  let out = '';
+  for (let i = 0; i < 4; i++) {
+    const x = side < 0 ? 4 + i * 18 + rand() * 6 : 96 - i * 18 - rand() * 6;
+    out += person(rand, x * 0.8, 430 + i * 12 + rand() * 6, 2.2 - i * 0.2, { dark: true, rim: '#ff9a62', arms: rand() < 0.6 ? 1 : 0, animate: rand() < 0.6 });
   }
   return out;
 }
- 
-// ---- Soft blurred foreground bokeh, drifting slowly, sits nearest the camera ----
-function buildBokeh(w, h, rand, count) {
-  // Soft edges come from a radial gradient per colour (fades to transparent) instead of
-  // an feGaussianBlur filter, which had to be re-rasterised as the circles drifted.
-  let out = '<defs>' + BOKEH_COLORS.map((c, i) =>
-    `<radialGradient id="bokehG${i}"><stop offset="0%" stop-color="${c}" stop-opacity="1"/>` +
-    `<stop offset="55%" stop-color="${c}" stop-opacity="0.75"/><stop offset="100%" stop-color="${c}" stop-opacity="0"/></radialGradient>`).join('') + '</defs>';
-  for (let i = 0; i < count; i++) {
-    const x = rand() * w, y = h * (0.55 + rand() * 0.45);
-    const r = ((8 + rand() * 22) * 1.35).toFixed(1); // gradient falloff replaces the blur's spread
-    const dur = (6 + rand() * 6).toFixed(2);
-    const dx = (rand() * 34 - 17).toFixed(1);
-    const ci = Math.floor(rand() * BOKEH_COLORS.length);
-    out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="url(#bokehG${ci})" opacity="${(0.05 + rand() * 0.08).toFixed(2)}">` +
-      `<animateTransform attributeName="transform" type="translate" values="0,0;${dx},0;0,0" dur="${dur}s" repeatCount="indefinite"/>` +
-      `</circle>`;
-  }
-  return out;
-}
- 
+
 export class ParallaxBackground {
-  constructor(containerEl) {
+  // containerEl: behind the world. fgEl (optional): in front of the world.
+  constructor(containerEl, fgEl = null) {
     this.container = containerEl;
+    this.fgContainer = fgEl;
     this.layers = [];
     this._pulseTimer = null;
     this._build();
   }
- 
-  _makeLayer(factor, widthMult) {
-    const w = STAGE_W * widthMult;
+
+  _makeLayer(factor, widthMult, parent = this.container, origin = 'center center') {
+    const w = Math.round(STAGE_W * widthMult);
     const svgNS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('viewBox', `0 0 ${w} ${STAGE_H}`);
     svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('overflow', 'visible');
     svg.classList.add('bgLayer');
     svg.style.width = w + 'px';
-    svg.style.transformOrigin = 'center center'; // set once, not every frame
-    this.container.appendChild(svg);
+    svg.style.transformOrigin = origin;
+    parent.appendChild(svg);
     return { el: svg, factor, width: w, tx: NaN, zoom: NaN };
   }
- 
+
   _build() {
-    // Layer 1 — night sky + stars (farthest, barely moves)
-    const sky = this._makeLayer(0.05, 1.3);
-    sky.el.innerHTML = buildSkyLayer(sky.width, STAGE_H, seeded(7));
+    const sky = this._makeLayer(0.04, 1.3);
+    sky.el.innerHTML = skyLayer(sky.width, STAGE_H, seeded(7));
     this.layers.push(sky);
- 
-    // Layer 2 — spotlight truss with sweeping beam cones
-    const truss = this._makeLayer(0.12, 1.4);
-    truss.el.innerHTML = buildTrussLayer(truss.width, STAGE_H, seeded(13));
-    this.layers.push(truss);
- 
-    // Layer 3 — far stadium tiers, seeded crowd, and the marquee sign
-    const far = this._makeLayer(0.2, 1.6);
-    const rFar = seeded(29);
-    const farBaseY = STAGE_H * 0.86;
-    let farHtml = buildTierBackdrop(far.width, farBaseY, 6, 20, '#241a30', '#2c2038');
-    farHtml += buildMarquee(far.width, farBaseY - 6 * 20 - 14);
-    for (let row = 0; row < 6; row++) {
-      farHtml += buildCrowdRow(rFar, far.width, farBaseY - row * 20 - 10, 15, 3.6, { armChance: 0.08, arch: 10 + row * 4 });
+
+    const city = this._makeLayer(0.1, 1.4);
+    city.el.innerHTML = skylineLayer(city.width, STAGE_H, seeded(13));
+    this.layers.push(city);
+
+    const alley = this._makeLayer(0.25, 1.7);
+    alley.el.innerHTML = alleyLayer(alley.width, STAGE_H, seeded(29));
+    this.layers.push(alley);
+
+    const street = this._makeLayer(0.55, 2.2);
+    street.el.innerHTML = streetCrowdLayer(street.width, STAGE_H, seeded(41));
+    this.layers.push(street);
+
+    if (this.fgContainer) {
+      // Moves faster than the world (factor > 1), so it reads as nearer the camera.
+      const fg = this._makeLayer(1.35, 3.1, this.fgContainer, `center ${STAGE_H}px`);
+      fg.zoomFactor = 0.45; // anchored to the screen bottom; grows a little as the camera zooms in
+      fg.el.classList.add('fgCrowd');
+      fg.el.innerHTML = foregroundLayer(fg.width, STAGE_H, seeded(77));
+      this.layers.push(fg);
+      // Screen-fixed clusters at the left and right edges.
+      const svgNS = 'http://www.w3.org/2000/svg';
+      for (const side of [-1, 1]) {
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('viewBox', `0 0 100 ${STAGE_H}`);
+        svg.setAttribute('overflow', 'visible');
+        svg.classList.add('sideCrowd', side < 0 ? 'left' : 'right');
+        svg.innerHTML = `<g class="rowJump">${sideCluster(seeded(side < 0 ? 101 : 202), side)}</g>`;
+        this.fgContainer.appendChild(svg);
+        this.layers.push({ el: svg, fixed: true });
+      }
     }
-    farHtml += buildCheerGlow(far.width, farBaseY - 6 * 20 - 16, farBaseY);
-    far.el.innerHTML = farHtml;
-    this.layers.push(far);
- 
-    // Layer 4 — mid tiers, crowd with flags, camera flashes, ringside ad barricade
-    const mid = this._makeLayer(0.42, 1.9);
-    const rMid = seeded(41);
-    const midBaseY = STAGE_H * 0.98;
-    let midHtml = buildTierBackdrop(mid.width, midBaseY, 5, 28, '#2c2038', '#352842');
-    for (let row = 0; row < 5; row++) {
-      midHtml += buildCrowdRow(rMid, mid.width, midBaseY - row * 28 - 14, 20, 5.2, { armChance: 0.18, arch: 14 + row * 6 });
-    }
-    midHtml += buildCheerGlow(mid.width, midBaseY - 5 * 28 - 20, midBaseY);
-    midHtml += buildFlashes(mid.width, 10, seeded(61), midBaseY - 5 * 28 - 40, midBaseY);
-    midHtml += buildAdBanner(mid.width, midBaseY - 14, 14, seeded(53)); // frontmost, drawn last so it sits in front of the crowd
-    mid.el.innerHTML = midHtml;
-    this.layers.push(mid);
- 
-    // Layer 5 — soft bokeh foreground, nearest the camera
-    const fg = this._makeLayer(0.6, 1.2);
-    fg.el.innerHTML = buildBokeh(fg.width, STAGE_H, seeded(97), 14);
-    this.layers.push(fg);
   }
- 
+
   update(cameraCenterX, zoom = 1) {
-    this.layers.forEach(layer => {
+    for (const layer of this.layers) {
+      if (layer.fixed) continue;
       const shift = (cameraCenterX - WORLD_W / 2) * layer.factor;
       const baseOffset = (layer.width - STAGE_W) / 2;
       const tx = -baseOffset - shift;
-      // Skip the style write (and the re-raster it triggers) when nothing visibly moved.
-      if (Math.abs(tx - layer.tx) < 0.1 && Math.abs(zoom - layer.zoom) < 0.0005) return;
+      if (Math.abs(tx - layer.tx) < 0.1 && Math.abs(zoom - layer.zoom) < 0.0005) continue;
       layer.tx = tx; layer.zoom = zoom;
-      layer.el.style.transform = `translateX(${tx.toFixed(1)}px) scale(${zoom.toFixed(4)})`;
-    });
+      // Far layers zoom less than the world, near ones more (depth).
+      const z = 1 + (zoom - 1) * (layer.zoomFactor ?? Math.min(1.2, layer.factor));
+      layer.el.style.transform = `translateX(${tx.toFixed(1)}px) scale(${z.toFixed(4)})`;
+    }
   }
- 
-  // Pause/resume every SMIL animation in the scene. Off on the select screen, while
-  // paused, and behind the match-result overlay; on during a live match.
+
+  // Pause/resume every SMIL and CSS animation in the scene. Off on the select screen,
+  // while paused, and behind the match-result overlay; on during a live match.
   setActive(on) {
     if (this.active === on) return;
     this.active = on;
-    this.layers.forEach(layer => {
+    for (const layer of this.layers) {
       const svg = layer.el;
       if (on && svg.unpauseAnimations) svg.unpauseAnimations();
       else if (!on && svg.pauseAnimations) svg.pauseAnimations();
-    });
+      svg.classList.toggle('paused', !on);
+    }
   }
 
-  // Crowd "surge" — briefly pulses every layer via the .bgLayer.crowdCheer CSS rule
-  // (already defined in style.css, previously never triggered from anywhere).
+  // Crowd surge: the whole crowd jumps and the warm glow pulses.
   // intensity: roughly 0.5 (small reaction) to 3 (KO / match-winning moment).
   pulse(intensity = 1) {
     clearTimeout(this._pulseTimer);
     const holdMs = 500 + Math.min(intensity, 3) * 350;
-    this.layers.forEach(layer => layer.el.classList.add('crowdCheer'));
+    for (const layer of this.layers) {
+      layer.el.classList.remove('crowdCheer');
+      void layer.el.getBoundingClientRect;
+      layer.el.classList.add('crowdCheer');
+      layer.el.style.setProperty('--cheerAmp', `${Math.min(3, intensity) * -2.5}px`);
+    }
     this._pulseTimer = setTimeout(() => {
-      this.layers.forEach(layer => layer.el.classList.remove('crowdCheer'));
+      for (const layer of this.layers) layer.el.classList.remove('crowdCheer');
     }, holdMs);
   }
+}
+
+// ---- 5. The street surface, drawn inside the fight world (moves 1:1 with fighters).
+// Returned as markup for an absolutely positioned <svg> whose top sits just behind the
+// fighters' feet. Includes a curb, worn lane paint, cracks, a storm drain grate and
+// puddles that reflect the neon.
+export function streetFloorSVG() {
+  const w = WORLD_W + 600, h = 420, x0 = -300, rand = seeded(313);
+  let out = `<svg class="streetFloor" viewBox="${x0} 0 ${w} ${h}" style="left:${x0}px;width:${w}px;height:${h}px" overflow="visible">
+  <defs>
+    <linearGradient id="asphalt" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2a2530"/><stop offset="18%" stop-color="#1d1a22"/><stop offset="100%" stop-color="#0c0b10"/></linearGradient>
+    <pattern id="grit" width="7" height="7" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="2" r=".7" fill="#3a3540" opacity=".6"/><circle cx="5" cy="5.5" r=".5" fill="#09080c" opacity=".7"/></pattern>
+    <radialGradient id="puddleG"><stop offset="0%" stop-color="#ff3b6b" stop-opacity=".35"/><stop offset="60%" stop-color="#2ee6ff" stop-opacity=".12"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <radialGradient id="spotG" cx="50%" cy="20%" r="60%"><stop offset="0%" stop-color="#ffdca0" stop-opacity=".16"/><stop offset="100%" stop-color="#ffdca0" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect x="${x0}" y="0" width="${w}" height="${h}" fill="url(#asphalt)"/>
+  <rect x="${x0}" y="0" width="${w}" height="${h}" fill="url(#grit)"/>
+  <rect x="${x0}" y="0" width="${w}" height="6" fill="#3d3742"/><rect x="${x0}" y="6" width="${w}" height="2" fill="#0a090d"/>`;
+  // light pool under the fight
+  out += `<ellipse cx="${WORLD_W / 2}" cy="40" rx="900" ry="120" fill="url(#spotG)"/>`;
+  // worn lane dashes
+  for (let x = x0; x < x0 + w; x += 140) out += `<rect x="${x}" y="58" width="70" height="5" fill="#d8c27a" opacity="${(0.12 + rand() * 0.18).toFixed(2)}" transform="skewX(-30)"/>`;
+  // cracks
+  for (let i = 0; i < 26; i++) {
+    let cx = x0 + rand() * w, cy = 12 + rand() * 90, d = `M${f1(cx)},${f1(cy)}`;
+    for (let k = 0; k < 4; k++) { cx += rand() * 40 - 10; cy += rand() * 12 - 4; d += `L${f1(cx)},${f1(cy)}`; }
+    out += `<path d="${d}" stroke="#08070b" stroke-width="${f1(0.8 + rand() * 1.2)}" fill="none" opacity=".8"/>`;
+  }
+  // puddles reflecting neon
+  for (let i = 0; i < 7; i++) out += `<ellipse cx="${f1(x0 + rand() * w)}" cy="${f1(24 + rand() * 60)}" rx="${f1(40 + rand() * 60)}" ry="${f1(5 + rand() * 6)}" fill="url(#puddleG)"/>`;
+  // storm drain grate in the middle of the street (like the app icon)
+  const gx = WORLD_W / 2 - 60;
+  out += `<g transform="translate(${gx},22)"><rect width="120" height="34" rx="3" fill="#0b0a0e" stroke="#4a4550" stroke-width="2.5"/>` +
+    Array.from({ length: 11 }, (_, i) => `<rect x="${8 + i * 10}" y="5" width="4" height="24" fill="#2b2731"/>`).join('') + `</g>`;
+  out += `</svg>`;
+  return out;
 }

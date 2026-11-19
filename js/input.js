@@ -126,6 +126,7 @@ function initJoystick(root) {
     if (!active) return;
     e.preventDefault();
     let dx = e.clientX - originX, dy = e.clientY - originY;
+    if (inputRotation === 90) { const t = dx; dx = dy; dy = -t; } // layout is rotated 90° clockwise
     const dist = Math.hypot(dx, dy);
     if (dist > JOY_MAX_R) { const s = JOY_MAX_R / dist; dx *= s; dy *= s; }
     // Knob follows the full 2D drag visually...
@@ -167,6 +168,11 @@ function initJoystick(root) {
   wrap.addEventListener('lostpointercapture', release);
 }
  
+// When main.js rotates the fight layout to force landscape, screen-space drags must be
+// turned back into game-space directions.
+let inputRotation = 0;
+export function setInputRotation(deg) { inputRotation = deg; }
+
 // Impact haptics: main.js scales the vibration length by hit tier.
 export function haptic(ms) { vibrate(Math.max(1, Math.round(ms))); }
 

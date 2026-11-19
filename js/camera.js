@@ -6,7 +6,7 @@
 import { WORLD_W, GROUND_Y, STAGE_W } from './world.js';
 
 const MIN_VIEW = 340;
-const MAX_VIEW = 640;
+const MAX_VIEW = 980; // wide enough to frame both fighters at their round-start spacing
 const START_VIEW = MAX_VIEW;
 
 const ZOOM_RATE = 6.0;

@@ -97,3 +97,71 @@ export function flashKO(koFlashEl) {
   if (!koFlashEl) return;
   koFlashEl.classList.remove('show'); void koFlashEl.offsetWidth; koFlashEl.classList.add('show');
 }
+
+// ---------------- Batch 2: heavier impact effects ----------------
+// Persistent blood on the street: splats land where blood falls and stay for the round
+// (capped so a long round can't grow the DOM forever). Render-only.
+let decalLayer = null;
+const MAX_DECALS = 48;
+export function initDecals(layerEl) { decalLayer = layerEl; }
+export function clearDecals() { if (decalLayer) decalLayer.innerHTML = ''; }
+
+export function spawnBloodDecal(x, groundY, dirX, power = 1) {
+  if (!decalLayer) return;
+  const n = 1 + Math.round(Math.random() * power);
+  for (let i = 0; i < n; i++) {
+    const el = document.createElement('div');
+    el.className = 'bloodDecal';
+    const w = (8 + Math.random() * 16) * power, h = w * (0.22 + Math.random() * 0.15);
+    el.style.left = (x + dirX * (10 + Math.random() * 50 * power)).toFixed(1) + 'px';
+    el.style.top = (groundY + 2 + Math.random() * 14).toFixed(1) + 'px';
+    el.style.width = w.toFixed(1) + 'px'; el.style.height = h.toFixed(1) + 'px';
+    el.style.setProperty('--rot', (Math.random() * 20 - 10).toFixed(1) + 'deg');
+    decalLayer.appendChild(el);
+    while (decalLayer.childElementCount > MAX_DECALS) decalLayer.firstElementChild.remove();
+  }
+}
+
+// A heavy hit: more droplets, a few long spray arcs, and splats on the floor.
+export function spawnBloodBurst(x, y, dirX, power, groundY) {
+  spawnBlood(x, y, dirX, power * 1.6);
+  for (let i = 0; i < Math.round(3 * power); i++) {
+    const el = spawnEl('blood blood-arc');
+    if (!el) break;
+    const dist = 40 + Math.random() * 70 * power;
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.style.setProperty('--dx', (dirX * dist).toFixed(1) + 'px');
+    el.style.setProperty('--dy', (groundY - y + Math.random() * 10).toFixed(1) + 'px');
+    el.style.setProperty('--sz', (3 + Math.random() * 3).toFixed(1) + 'px');
+  }
+  setTimeout(() => spawnBloodDecal(x, groundY, dirX, power), 380);
+}
+
+// Expanding shockwave ring + a bright star flash at the point of impact.
+export function spawnImpact(x, y, color, power = 1) {
+  const ring = spawnEl('impactRing');
+  if (ring) {
+    ring.style.left = x + 'px'; ring.style.top = y + 'px';
+    ring.style.setProperty('--s', (0.8 + power * 0.6).toFixed(2));
+    ring.style.borderColor = color;
+  }
+  const star = spawnEl('impactStar');
+  if (star) {
+    star.style.left = x + 'px'; star.style.top = y + 'px';
+    star.style.setProperty('--s', (0.7 + power * 0.5).toFixed(2));
+    star.style.setProperty('--r', (Math.random() * 90).toFixed(0) + 'deg');
+  }
+}
+
+// Dust puffs rolling along the floor (knockdowns, landings, wall slides).
+export function spawnDust(x, groundY, power = 1) {
+  for (let i = 0; i < Math.round(5 * power); i++) {
+    const el = spawnEl('dust');
+    if (!el) break;
+    const side = i % 2 ? 1 : -1;
+    el.style.left = (x + side * Math.random() * 10).toFixed(1) + 'px';
+    el.style.top = (groundY - 4).toFixed(1) + 'px';
+    el.style.setProperty('--dx', (side * (20 + Math.random() * 40 * power)).toFixed(1) + 'px');
+    el.style.setProperty('--sz', (10 + Math.random() * 14 * power).toFixed(1) + 'px');
+  }
+}

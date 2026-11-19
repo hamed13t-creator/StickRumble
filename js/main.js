@@ -7,13 +7,13 @@
 // pausing freezes all of it and the same seed + inputs replay the same match.
 import { Fighter, CHARACTERS, rigSVG, NEUTRAL_INPUT } from './fighter.js';
 import { Camera } from './camera.js';
-import { ParallaxBackground } from './background.js';
+import { ParallaxBackground, streetFloorSVG } from './background.js';
 import { AI } from './ai.js';
-import { input, initInput, edgesFrom, consumeDash, consumeFlip, clearInputQueues, haptic } from './input.js';
+import { input, initInput, edgesFrom, consumeDash, consumeFlip, clearInputQueues, haptic, setInputRotation } from './input.js';
 import { Audio } from './audio.js';
 import * as FX from './effects.js';
 import { createRng } from './rng.js';
-import { STAGE_W, STAGE_H, STEP, framesFor, ARENA_MIN_X, ARENA_MAX_X } from './world.js';
+import { STAGE_W, STAGE_H, STEP, framesFor, ARENA_MIN_X, ARENA_MAX_X, GROUND_Y } from './world.js';
 
 // ---------------- DOM refs ----------------
 const selectScreen = document.getElementById('selectScreen');
@@ -81,24 +81,53 @@ function fitStage() {
 new ResizeObserver(fitStage).observe(arenaOuter);
 window.addEventListener('resize', fitStage);
 
-// ---------------- Orientation: landscape only during the fight, free elsewhere ----------------
-// Best-effort: the Orientation Lock API isn't available on every browser (notably iOS
-// Safari), so every call is feature-detected and its promise/exception is swallowed.
-function lockLandscape() {
+// ---------------- Orientation: menu always portrait, fight always landscape ----------------
+// On phones and tablets:
+//  1. Where the browser allows it (Android Chrome and installed PWAs), the game goes
+//     fullscreen and really locks the screen orientation.
+//  2. Everywhere else (iPhone Safari, or when the lock is refused) the page rotates its
+//     own layout 90 degrees whenever the device is held the "wrong" way, so the fight is
+//     always shown landscape and the menu always portrait, however the phone is held.
+// Desktop browsers are left alone (the menu is already a portrait card there).
+const coarseMQ = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+let wantLandscape = false;
+function isTouchDevice() { return !!(coarseMQ && coarseMQ.matches); }
+function requestOrientation(kind) {
+  if (!isTouchDevice()) return;
   const so = screen.orientation;
-  if (so && so.lock) so.lock('landscape').catch(() => {});
+  const lock = () => { if (so && so.lock) so.lock(kind).catch(() => {}); };
+  const el = document.documentElement;
+  if (kind === 'landscape' && !document.fullscreenElement && el.requestFullscreen) {
+    el.requestFullscreen({ navigationUI: 'hide' }).then(lock, lock);
+  } else lock();
 }
-function unlockOrientation() {
-  const so = screen.orientation;
-  if (so && so.unlock) { try { so.unlock(); } catch (_) {} }
+function applyOrientation() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const root = document.documentElement.style;
+  root.setProperty('--vw', w + 'px'); root.setProperty('--vh', h + 'px');
+  const touch = isTouchDevice(), portrait = h > w;
+  const rotateGame = touch && wantLandscape && portrait;
+  const rotateMenu = touch && !wantLandscape && !portrait;
+  document.body.classList.toggle('forceLandscape', rotateGame);
+  document.body.classList.toggle('forcePortrait', rotateMenu);
+  setInputRotation(rotateGame ? 90 : 0); // joystick drags arrive rotated; turn them back
+  fitStage();
 }
+function lockLandscape() { wantLandscape = true; requestOrientation('landscape'); applyOrientation(); }
+function unlockOrientation() { wantLandscape = false; requestOrientation('portrait'); applyOrientation(); }
+window.addEventListener('resize', applyOrientation);
+window.addEventListener('orientationchange', () => setTimeout(applyOrientation, 50));
+if (coarseMQ && coarseMQ.addEventListener) coarseMQ.addEventListener('change', applyOrientation);
+applyOrientation();
 
 // ---------------- Core game objects ----------------
 initInput(controlsRoot);
 FX.initEffects(worldEl);
 const camera = new Camera(worldEl);
-const background = new ParallaxBackground(bgLayersEl);
-background.setActive(false); // select screen: background animation paused
+const background = new ParallaxBackground(bgLayersEl, document.getElementById('fgLayers'));
+// Crowd animation and the crowd's background murmur run only during a live match.
+function setScene(on) { background.setActive(on); Audio.ambience(on); }
+setScene(false); // select screen: background animation paused
 const ai = new AI(difficulty);
 
 // prefers-reduced-motion: halve camera shake/kick and hit-stop jitter, skip the KO white
@@ -139,7 +168,8 @@ const KICK_PX = { punch: 6, kick: 11, lowkick: 9, rush: 15, aerialKick: 13, bloc
 const HAPTIC_MS = { punch: 8, kick: 16, lowkick: 14, rush: 30, aerialKick: 24, block: 6, wallsplat: 35, ko: 60 };
 const SPARKS = { punch: 9, kick: 15, lowkick: 12, rush: 22, aerialKick: 18, block: 8 };
 const STREAKS = { punch: 0, kick: 2, lowkick: 2, rush: 5, aerialKick: 4, block: 0 };
-const BLOOD = { punch: 0.6, kick: 1.1, lowkick: 0.9, rush: 1.8, aerialKick: 1.5 };
+const BLOOD = { punch: 0.9, kick: 1.5, lowkick: 1.2, rush: 2.4, aerialKick: 2 };
+const IMPACT = { punch: 0.6, kick: 1, lowkick: 0.85, rush: 1.6, aerialKick: 1.3 };
 
 // Freeze the whole simulation (both fighters, AI, round clock) for n sim frames. Called
 // from dispatchEvents, which runs inside stepSim on deterministic events, so the freeze
@@ -183,7 +213,10 @@ function dispatchEvents(fighter, opp) {
         haptic(HAPTIC_MS[tier] ?? 10);
         FX.spawnSparks(ev.x, ev.y, ev.color, SPARKS[tier] ?? 10, tier === 'rush' ? 1.5 : 1);
         if (STREAKS[tier]) FX.spawnStreaks(ev.x, ev.y, ev.color, STREAKS[tier], 1.2);
-        if (BLOOD[tier]) FX.spawnBlood(ev.x, ev.y, ev.dirX, BLOOD[tier]);
+        if (IMPACT[tier]) FX.spawnImpact(ev.x, ev.y, ev.color, IMPACT[tier]);
+        if (BLOOD[tier] >= 1.4) FX.spawnBloodBurst(ev.x, ev.y, ev.dirX, BLOOD[tier], GROUND_Y);
+        else if (BLOOD[tier]) { FX.spawnBlood(ev.x, ev.y, ev.dirX, BLOOD[tier]); if (Math.random() < 0.5) FX.spawnBloodDecal(ev.x, GROUND_Y, ev.dirX, 0.7); }
+        hype(tier === 'rush' || tier === 'aerialKick' ? 0.25 : 0.08);
         Audio.play(tier === 'rush' ? 'special' : (tier.includes('kick') ? 'kick' : 'punch'));
         if (tier === 'rush') Audio.play('splatter');
         if (fighter.comboCount >= 2) {
@@ -198,11 +231,12 @@ function dispatchEvents(fighter, opp) {
         // Crowd reacts to heavy blows (rush tier) OR a 3x+ combo, whichever is stronger.
         const comboIntensity = fighter.comboCount >= 3 ? Math.min(1 + (fighter.comboCount - 3) * 0.15, 2.2) : 0;
         const heavyIntensity = tier === 'rush' ? 1.4 : 0;
-        const crowdIntensity = Math.max(comboIntensity, heavyIntensity);
+        const crowdIntensity = Math.max(comboIntensity, heavyIntensity, tier === 'kick' || tier === 'aerialKick' ? 0.8 : 0);
         if (crowdIntensity > 0) {
           Audio.play('crowdReact', crowdIntensity);
+          if (tier === 'rush' || tier === 'aerialKick') Audio.play('ooh', 1.2);
           background.pulse(crowdIntensity);
-        }
+        } else background.pulse(0.4); // every clean hit gets a ripple from the crowd
         updateHealthBars();
         // Round end is no longer triggered here: the lethal hit puts the victim in the
         // 'ko' state, stepSim() schedules the round end KO_HOLD_FRAMES later, and the
@@ -229,12 +263,15 @@ function dispatchEvents(fighter, opp) {
         FX.spawnSparks(ev.x + ev.side * 10, ev.y, '#ffffff', 16, 1.3);
         FX.spawnStreaks(ev.x + ev.side * 10, ev.y, '#ffcf4d', 4, 1.1);
         Audio.play('kick'); Audio.play('land');
-        Audio.play('crowdReact', 1.3);
-        background.pulse(1.3);
+        Audio.play('crowdReact', 1.3); Audio.play('ooh', 1.4);
+        background.pulse(1.6);
+        FX.spawnBloodBurst(ev.x, ev.y, -ev.side, 1.2, GROUND_Y);
+        hype(0.3);
         break;
       case 'knockdown':
         camera.shake(Math.min(0.35, 0.16 * (ev.weight || 1)));
-        FX.spawnSparks(ev.x, ev.y - 6, '#c9b8a0', 8, 0.8); // floor dust
+        FX.spawnDust(ev.x, GROUND_Y, 0.8 + 0.3 * (ev.weight || 1));
+        Audio.play('crowdReact', 1); background.pulse(1);
         Audio.play('land');
         break;
       case 'techroll':
@@ -248,7 +285,10 @@ function dispatchEvents(fighter, opp) {
         freezeSim(HITSTOP_FRAMES.ko, fighter);
         haptic(HAPTIC_MS.ko);
         FX.spawnSparks(ev.x, ev.y, '#ffffff', 30, 1.8);
-        Audio.play('ko');
+        FX.spawnImpact(ev.x, ev.y - 30, '#ffffff', 2.4);
+        FX.spawnBloodBurst(ev.x, ev.y - 30, ev.dirX || 1, 2.6, GROUND_Y);
+        Audio.play('ko'); Audio.play('ooh', 1.8); Audio.play('cheer', 1.6);
+        hype(1);
         Audio.play('crowdReact', 2.5);
         background.pulse(3);
         break;
@@ -303,6 +343,32 @@ let wallEls = [];
 function mountWalls() {
   wallEls = [0, 1].map(() => { const w = document.createElement('div'); w.className = 'arenaWall'; worldEl.appendChild(w); return w; });
 }
+// The street surface and the blood that collects on it (both render-only, in world space).
+function mountStreet() {
+  worldEl.insertAdjacentHTML('afterbegin', streetFloorSVG());
+  const floor = worldEl.querySelector('.streetFloor');
+  floor.style.top = (GROUND_Y - 8) + 'px';
+  const decals = document.createElement('div');
+  decals.className = 'decals';
+  floor.after(decals);
+  FX.initDecals(decals);
+}
+
+// Crowd mood (render-only): the murmur swells as the fight heats up, and fans whistle
+// and cheer at random. Excitement rises with hits and decays over time.
+let crowdHype = 0, nextCrowdNoise = 0;
+function hype(amount) { crowdHype = Math.min(1, crowdHype + amount); }
+function updateCrowd(dt, now) {
+  crowdHype = Math.max(0, crowdHype - dt * 0.08);
+  const low = match && (p1.health < p1.maxHealth * 0.25 || p2.health < p2.maxHealth * 0.25);
+  Audio.crowdLevel(Math.max(crowdHype, low ? 0.6 : 0, match && match.suddenDeath ? 0.8 : 0));
+  if (now >= nextCrowdNoise) {
+    nextCrowdNoise = now + 2500 + Math.random() * 4000 * (1 - crowdHype * 0.6);
+    if (Math.random() < 0.5) Audio.play('whistle');
+    else Audio.play('crowdReact', 0.4 + crowdHype);
+  }
+}
+
 function renderWalls() {
   if (!match || wallEls.length !== 2) return;
   const on = !!match.suddenDeath;
@@ -331,13 +397,14 @@ function startMatch(p1Key, p2Key, diff) {
   ai.setDifficulty(diff);
   ai.reset();
   camera.reset();
-  background.setActive(true);
+  setScene(true);
 
   p1 = new Fighter(p1Key, 'p1', true);
   p2 = new Fighter(p2Key, 'p2', false);
   p1.mount(worldEl);
   p2.mount(worldEl);
   mountWalls();
+  mountStreet();
 
   prevPlayerEdge = { punch: false, kick: false, jump: false, block: false };
   prevCpuEdge = { punch: false, kick: false, jump: false, block: false };
@@ -370,6 +437,7 @@ function startMatch(p1Key, p2Key, diff) {
 }
 
 async function runRoundIntro(myId) {
+  FX.clearDecals(); crowdHype = 0;
   if (!match || match.id !== myId) return;
   p1.reset(500);
   p2.reset(1300);
@@ -471,7 +539,7 @@ function endMatch(winnerSide) {
   overlay.style.display = 'flex';
   // Render-only: let the cheer pulse play, then stop the background behind the overlay.
   const m = match;
-  setTimeout(() => { if (m === match && m.matchOver) background.setActive(false); }, 1600);
+  setTimeout(() => { if (m === match && m.matchOver) setScene(false); }, 1600);
 }
 
 // ---------------- Pause ----------------
@@ -479,14 +547,14 @@ function pauseGame() {
   if (!match || match.matchOver || match.paused) return;
   match.paused = true;
   pauseOverlay.style.display = 'flex';
-  background.setActive(false);
+  setScene(false);
 }
 function resumeGame() {
   if (!match || match.matchOver || !match.paused) return;
   match.paused = false;
   lastFrameTime = 0; stepAccumulator = 0; // no catch-up for the paused wall-clock time
   pauseOverlay.style.display = 'none';
-  background.setActive(true);
+  setScene(true);
 }
 function exitToSelect() {
   retireMatch(match);
@@ -500,7 +568,7 @@ function exitToSelect() {
   gameScreen.style.display = 'none';
   selectScreen.style.display = 'flex';
   clearWorld();
-  background.setActive(false);
+  setScene(false);
   unlockOrientation();
 }
 
@@ -713,6 +781,7 @@ function loop(ts) {
     p2.render(elapsed, frozen && match.hitStopVictim === p2 ? jitter : 0);
   }
   renderWalls();
+  if (match.roundActive && !match.paused) updateCrowd(elapsed, ts);
   // Camera/background keep tracking between rounds (banners) so the scene settles
   // smoothly onto the reset fighters instead of visibly snapping.
   camera.update(p1, p2, elapsed);

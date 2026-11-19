@@ -139,6 +139,18 @@ const SFX = {
       tone(196, 150, 0.16, 'triangle', 0.12, at);
     }
   },
+  // Crowd "OOOH!" on a big hit: a vowel-like swell of voices.
+  ooh(intensity = 1) {
+    crowdSwell(0.9, 0.2 * intensity, 380, 720);
+    crowdSwell(0.8, 0.14 * intensity, 600, 1100, 0.04);
+    for (let i = 0; i < 6; i++) tone(260 + Math.random() * 160, 200 + Math.random() * 80, 0.6, 'triangle', 0.035 * intensity, Math.random() * 0.12, (Math.random() - 0.5) * 0.8);
+  },
+  // Two-finger whistle from somewhere in the crowd.
+  whistle() {
+    const pan = (Math.random() - 0.5) * 1.2, d = Math.random() * 0.1;
+    tone(2300, 2900, 0.22, 'sine', 0.06, d, pan);
+    tone(2900, 2200, 0.32, 'sine', 0.06, d + 0.24, pan);
+  },
   cheer(intensity = 1) {
     const dur = 1.1 + intensity * 0.5;
     crowdSwell(dur, 0.3 * intensity, 300, 1400);
@@ -151,8 +163,41 @@ const SFX = {
   },
 };
  
+// Constant crowd murmur under the whole fight; crowdLevel() swells it with the action.
+let amb = null;
+function startAmbience() {
+  if (amb || !ctx) return;
+  const src = ctx.createBufferSource();
+  src.buffer = getNoiseBuffer(); src.loop = true;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 650; bp.Q.value = 0.45;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200;
+  const g = ctx.createGain(); g.gain.value = 0.0001;
+  const lfo = ctx.createOscillator(); lfo.frequency.value = 0.23;
+  const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.012;
+  lfo.connect(lfoGain).connect(g.gain);
+  src.connect(bp).connect(lp).connect(g).connect(ctx.destination);
+  src.start(); lfo.start();
+  amb = { src, g, lfo, level: 0 };
+}
+
 export const Audio = {
   unlock() { ensure(); },
+  // on: fade the crowd bed in (live match) or out (menus, pause).
+  ambience(on) {
+    if (!on && !ctx) return; // nothing playing yet; don't create audio before a tap
+    if (!ensure()) return;
+    startAmbience();
+    const t = ctx.currentTime;
+    amb.g.gain.cancelScheduledValues(t);
+    amb.g.gain.setTargetAtTime(on ? 0.05 + amb.level * 0.06 : 0.0001, t, on ? 0.6 : 0.25);
+    amb.on = on;
+  },
+  // 0 (calm) .. 1 (frenzy): how loud the bed sits while on.
+  crowdLevel(v) {
+    if (!amb || !amb.on) return;
+    amb.level = Math.max(0, Math.min(1, v));
+    amb.g.gain.setTargetAtTime(0.05 + amb.level * 0.06, ctx.currentTime, 0.4);
+  },
   // BUGFIX: this previously dropped every argument after `name`, so
   // Audio.play('crowdReact', 2) or Audio.play('cheer', 1.6) always ran at a flat
   // intensity=1 regardless of what was passed — the intensity parameters on

@@ -10,6 +10,7 @@
 // keyframes (block/jump/kick/lowkick/punch/rush poses) instead of fighting them.
 // Physics, attack timing, state machine, combo logic, and events are unchanged.
 import { GROUND_Y, ARENA_MIN_X, ARENA_MAX_X, STEP, framesFor } from './world.js';
+import { Puppet, puppetSVG } from './puppet.js';
 
 // ---------------- Roster ----------------
 // Per-character animation/proportion data. Shoulder/elbow/hip/knee stay fixed (style.css
@@ -34,205 +35,9 @@ export const CHARACTERS = [
 ];
 export const charByKey = k => CHARACTERS.find(c => c.key === k) || CHARACTERS[0];
 
-function shade(hex, amt) {
-  let c = hex.replace('#', '');
-  if (c.length === 3) c = c.split('').map(x => x + x).join('');
-  const num = parseInt(c, 16);
-  const r = Math.min(255, Math.max(0, (num >> 16) + amt));
-  const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + amt));
-  const b = Math.min(255, Math.max(0, (num & 0xff) + amt));
-  return `rgb(${r},${g},${b})`;
-}
-
-// ---------------- Visual-only accessories (head/torso). Hand accessories (gloves,
-// wristbands) are drawn per-arm in rigSVG so they track each character's hand position. --
-function accessorySVG(ch) {
-  switch (ch.accessory) {
-    case 'headband': return `<rect x="19" y="9" width="22" height="4" fill="${ch.accent}"/><path d="M41,10 Q50,7 54,15 Q49,12 44,14 Z" fill="${ch.accent}"/>`;
-    case 'topknot': return `<circle cx="30" cy="4" r="3.5" fill="${ch.color}"/><rect x="18" y="52" width="24" height="5" rx="1" fill="${ch.accent}"/>`;
-    case 'antenna': return `<line x1="30" y1="6" x2="30" y2="0" stroke="${ch.accent}" stroke-width="2"/><circle cx="30" cy="0" r="2.2" fill="${ch.accent}"/>`;
-    case 'robe': return `<path d="M18,50 Q11,58 15,68 Q18,60 21,58 Z" fill="${ch.accent}" opacity=".75"/><path d="M42,50 Q49,58 45,68 Q42,60 39,58 Z" fill="${ch.accent}" opacity=".7"/>`;
-    default: return '';
-  }
-}
-
-function faceSVG(ch) {
-  const isRobot = ch.accessory === 'antenna';
-  const eyeFill = isRobot ? ch.accent : '#1a1420';
-  return `<g class="face">
-    <path d="M23.5,11.5 Q26,9.8 28.4,11.2" stroke="#2a1810" stroke-width="1.1" fill="none" stroke-linecap="round" opacity=".85"/>
-    <path d="M31.6,11.2 Q34,9.8 36.5,11.5" stroke="#2a1810" stroke-width="1.1" fill="none" stroke-linecap="round" opacity=".85"/>
-    <ellipse cx="26" cy="15" rx="1.7" ry="${isRobot ? 2.2 : 1.9}" fill="${eyeFill}"/>
-    <ellipse cx="34" cy="15" rx="1.7" ry="${isRobot ? 2.2 : 1.9}" fill="${eyeFill}"/>
-    <path class="mouthNeutral" d="M25.5,20 Q30,21.7 34.5,20" stroke="#3a2418" stroke-width="1.3" fill="none" stroke-linecap="round"/>
-    <ellipse class="mouthOpen" cx="30" cy="20.5" rx="3" ry="2.4" fill="#5c2418" opacity="0"/>
-  </g>`;
-}
-
-// ---- Rig-building helpers: joint shading, a pelvis-anchored torso silhouette, and
-// foot/fist caps drawn as static children of each limb group (so they inherit whatever
-// rotation CSS or JS applies to that group, for free). ----
-function jointCap(cx, cy, r, color, style) {
-  if (style === 'mech') {
-    const pts = Array.from({ length: 6 }, (_, i) => {
-      const a = Math.PI / 6 + i * Math.PI / 3;
-      return `${(cx + Math.cos(a) * r).toFixed(1)},${(cy + Math.sin(a) * r).toFixed(1)}`;
-    }).join(' ');
-    return `<polygon points="${pts}" fill="${color}" stroke="${shade(color, -50)}" stroke-width="0.7"/><circle cx="${cx}" cy="${cy}" r="${(r * 0.32).toFixed(1)}" fill="${shade(color, 70)}" opacity=".85"/>`;
-  }
-  return `<circle cx="${cx}" cy="${cy}" r="${r.toFixed(1)}" fill="${color}"/><ellipse cx="${(cx - r * 0.3).toFixed(1)}" cy="${(cy - r * 0.32).toFixed(1)}" rx="${(r * 0.4).toFixed(1)}" ry="${(r * 0.3).toFixed(1)}" fill="#fff" opacity=".32"/>`;
-}
-
-function footShape(fx, fy, angleDeg, color) {
-  const pts = `${(fx - 3).toFixed(1)},${(fy - 1.4).toFixed(1)} ${(fx + 7).toFixed(1)},${(fy - 0.8).toFixed(1)} ${(fx + 8).toFixed(1)},${(fy + 2.6).toFixed(1)} ${(fx - 2.8).toFixed(1)},${(fy + 3.1).toFixed(1)}`;
-  return `<polygon points="${pts}" fill="${shade(color, -28)}" transform="rotate(${angleDeg.toFixed(1)} ${fx} ${fy})"/>`;
-}
-
-function handDecor(ch, hx, hy, angleDeg, skin) {
-  if (ch.accessory === 'gloves') {
-    return `<circle cx="${hx}" cy="${hy}" r="6" fill="#c0392b"/><circle cx="${(hx - 1.3).toFixed(1)}" cy="${(hy - 1.5).toFixed(1)}" r="1.9" fill="#e0605a" opacity=".7"/>`;
-  }
-  if (ch.accessory === 'wristbands') {
-    return `<ellipse cx="${hx}" cy="${hy}" rx="4" ry="3" fill="${skin}" transform="rotate(${angleDeg.toFixed(1)} ${hx} ${hy})"/><rect x="${(hx - 3.4).toFixed(1)}" y="${(hy - 2.2).toFixed(1)}" width="6.8" height="3.6" rx="1.4" fill="${ch.accent}" transform="rotate(${angleDeg.toFixed(1)} ${hx} ${hy})"/>`;
-  }
-  return `<ellipse cx="${hx}" cy="${hy}" rx="4" ry="3" fill="${skin}" transform="rotate(${angleDeg.toFixed(1)} ${hx} ${hy})"/>`;
-}
-
-function torsoPath(topW, waistW, pelvisW) {
-  const cx = 30, topY = 26, waistY = 48, hipY = 58, pelvisY = 64;
-  const tL = cx - topW / 2, tR = cx + topW / 2;
-  const wL = cx - waistW / 2, wR = cx + waistW / 2;
-  const hL = cx - pelvisW / 2, hR = cx + pelvisW / 2;
-  const pL = hL + 2.5, pR = hR - 2.5;
-  return `M${tL},${topY} Q${(tL - 1.5).toFixed(1)},${((topY + waistY) / 2).toFixed(1)} ${wL},${waistY} ` +
-    `L${hL},${hipY} L${pL},${pelvisY} L${pR},${pelvisY} L${hR},${hipY} ` +
-    `Q${(tR + 1.5).toFixed(1)},${((topY + waistY) / 2).toFixed(1)} ${tR},${topY} Z`;
-}
-
-// rigSVG produces the fighter's static "ready stance" — used both as the character-select
-// preview and as the Fighter's base pose that CSS/JS animate on top of. Shoulder (30,27),
-// front elbow (37,42), back elbow (23,42), hip (30,58), front knee (37,75), and back knee
-// (24,75) are the exact CSS transform-origin coordinates and are never moved; everything
-// past those joints (hands, feet) and the torso/head are free to vary per character.
-export function rigSVG(ch) {
-  const pose = ch.pose;
-  const back = shade(ch.color, -30), main = ch.color, hi = shade(ch.color, 55);
-  const jt = pose.jointStyle, ls = pose.limbScale;
-  const { footF, footB, backHand, headR, torsoTopW, waistW, pelvisW } = pose;
-  const frontHand = { x: 41, y: 29 };
-
-  const feAngle = Math.atan2(frontHand.y - 42, frontHand.x - 37) * 180 / Math.PI;
-  const beAngle = Math.atan2(backHand.y - 42, backHand.x - 23) * 180 / Math.PI;
-  const ffAngle = Math.atan2(footF.y - 75, footF.x - 37) * 180 / Math.PI;
-  const fbAngle = Math.atan2(footB.y - 75, footB.x - 24) * 180 / Math.PI;
-
-  return `<svg class="rig" viewBox="0 0 60 100">
-    <g class="legBackUpper">
-      <path d="M30,58 L24,75" stroke="${back}" stroke-width="${(7.5 * ls).toFixed(1)}" stroke-linecap="round"/>
-      ${jointCap(30, 58, 4.4 * ls, back, jt)}
-      <g class="legBackLower">
-        <path d="M24,75 L${footB.x},${footB.y}" stroke="${back}" stroke-width="${(7 * ls).toFixed(1)}" stroke-linecap="round"/>
-        ${jointCap(24, 75, 3.8 * ls, back, jt)}
-        ${footShape(footB.x, footB.y, fbAngle, back)}
-      </g>
-    </g>
-    <g class="legFrontUpper">
-      <path d="M30,58 L37,75" stroke="${main}" stroke-width="${(7.8 * ls).toFixed(1)}" stroke-linecap="round"/>
-      <g class="legFrontLower">
-        <path d="M37,75 L${footF.x},${footF.y}" stroke="${main}" stroke-width="${(7.2 * ls).toFixed(1)}" stroke-linecap="round"/>
-        ${jointCap(37, 75, 4 * ls, main, jt)}
-        ${footShape(footF.x, footF.y, ffAngle, main)}
-      </g>
-    </g>
-    <g class="torsoG">
-      <path d="${torsoPath(torsoTopW, waistW, pelvisW)}" fill="${main}"/>
-      <path d="M${(30 - torsoTopW * 0.26).toFixed(1)},31 Q30,28.4 ${(30 + torsoTopW * 0.26).toFixed(1)},31" stroke="${hi}" stroke-width="1.1" fill="none" opacity=".32"/>
-      <line x1="30" y1="33" x2="30" y2="53" stroke="${back}" stroke-width="1" opacity=".3"/>
-    </g>
-    <rect x="26.5" y="21" width="7" height="7" rx="2" fill="${shade(main, -12)}"/>
-    <g class="armBackUpper">
-      <path d="M30,27 L23,42" stroke="${back}" stroke-width="${(6.5 * ls).toFixed(1)}" stroke-linecap="round"/>
-      ${jointCap(30, 27, 3.9 * ls, back, jt)}
-      <g class="armBackLower">
-        <path d="M23,42 L${backHand.x},${backHand.y}" stroke="${back}" stroke-width="${(6 * ls).toFixed(1)}" stroke-linecap="round"/>
-        ${jointCap(23, 42, 3.3 * ls, back, jt)}
-        ${handDecor(ch, backHand.x, backHand.y, beAngle, ch.skin)}
-      </g>
-    </g>
-    <circle class="head" cx="30" cy="15" r="${headR}" fill="${ch.skin}"/>
-    ${faceSVG(ch)}
-    ${accessorySVG(ch)}
-    <g class="armFrontUpper">
-      <path d="M30,27 L37,42" stroke="${main}" stroke-width="${(6.8 * ls).toFixed(1)}" stroke-linecap="round"/>
-      ${jointCap(30, 27, 4.2 * ls, main, jt)}
-      <g class="armFrontLower">
-        <path d="M37,42 L${frontHand.x},${frontHand.y}" stroke="${main}" stroke-width="${(6.2 * ls).toFixed(1)}" stroke-linecap="round"/>
-        ${jointCap(37, 42, 3.6 * ls, main, jt)}
-        ${handDecor(ch, frontHand.x, frontHand.y, feAngle, ch.skin)}
-      </g>
-    </g>
-  </svg>`;
-}
-
-// ---------------- Render helpers: epsilon-gated style writes ----------------
-// _render() writes .style.transform to 8+ sub-elements per fighter, every frame, for
-// both fighters. Most of those writes (idle sway, tiny IK drift) change by well under a
-// degree frame-to-frame — still a template-literal string allocation + style
-// recalculation each time. These helpers skip the write when the change is
-// imperceptible, cutting GC churn substantially on the mobile devices this targets.
-const ROT_EPS = 0.05; // degrees
-function setRot(el, deg, precision = 1) {
-  if (!el) return;
-  if (el._prevRot !== undefined && Math.abs(deg - el._prevRot) < ROT_EPS) return;
-  el._prevRot = deg;
-  el.style.transform = deg === 0 ? '' : `rotate(${deg.toFixed(precision)}deg)`;
-}
-function clearRot(el) {
-  if (!el) return;
-  if (el._prevRot === 0) return;
-  el._prevRot = 0;
-  el.style.transform = '';
-}
-
-// ---------------- Compact 2-bone IK (punch arm) ----------------
-class TwoBoneIK {
-  constructor(len1, len2, maxStretch = 1.15) { this.len1 = len1; this.len2 = len2; this.maxStretch = maxStretch; }
-  solve(root, target, poleSign) {
-    let dx = target.x - root.x, dy = target.y - root.y;
-    let dist = Math.hypot(dx, dy);
-    const maxReach = (this.len1 + this.len2) * this.maxStretch;
-    let stretch = 1;
-    if (dist > maxReach) { stretch = dist / (this.len1 + this.len2); dist = maxReach; const a = Math.atan2(dy, dx); dx = Math.cos(a) * dist; dy = Math.sin(a) * dist; }
-    dist = Math.max(dist, Math.abs(this.len1 - this.len2) + 0.01);
-    const a = this.len1, b = this.len2, c = dist;
-    let cosA = Math.min(1, Math.max(-1, (a * a + c * c - b * b) / (2 * a * c)));
-    const bend = Math.max(Math.acos(cosA), 0.08);
-    const base = Math.atan2(dy, dx);
-    const upperAngle = base + poleSign * bend;
-    const joint = { x: root.x + Math.cos(upperAngle) * a, y: root.y + Math.sin(upperAngle) * a };
-    const lowerAngle = Math.atan2(target.y - joint.y, target.x - joint.x);
-    return { upperAngle, lowerAngle, stretch };
-  }
-}
-const ARM_ROOT = { x: 30, y: 27 };
-const ARM_LEN1 = Math.hypot(7, 15), ARM_LEN2 = Math.hypot(4, -13);
-const ARM_REST_U = Math.atan2(15, 7), ARM_REST_L = Math.atan2(-13, 4);
-const armIK = new TwoBoneIK(ARM_LEN1, ARM_LEN2, 1.2);
-function easeOutBack(x) { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); }
-function easeOutExpo(x) { return x >= 1 ? 1 : 1 - Math.pow(2, -10 * x); }
-function easeInOutQuad(x) { return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; }
-const PUNCH_KEYS = [{ t: 0, x: 41, y: 29 }, { t: 0.18, x: 32, y: 22 }, { t: 0.45, x: 68, y: 18 }, { t: 0.62, x: 50, y: 24 }, { t: 1, x: 41, y: 29 }];
-function sampleHand(keys, t) {
-  for (let i = 0; i < keys.length - 1; i++) {
-    const a = keys[i], b = keys[i + 1];
-    if (t >= a.t && t <= b.t) {
-      const local = (t - a.t) / ((b.t - a.t) || 1);
-      const eased = i === 0 ? easeInOutQuad(local) : i === 1 ? easeOutExpo(local) : i === 2 ? easeOutBack(local) : easeInOutQuad(local);
-      return { x: a.x + (b.x - a.x) * eased, y: a.y + (b.y - a.y) * eased };
-    }
-  }
-  return keys[keys.length - 1];
-}
+// Drawing and animation live in puppet.js (smooth neon outlines, keyed attacks).
+// rigSVG is kept as the name main.js uses for the character-select previews.
+export const rigSVG = puppetSVG;
 
 // ---------------- Timing / balance tables ----------------
 const ATTACK = {
@@ -319,23 +124,20 @@ export class Fighter {
   get weight() { return this.ch.pose.weight || 1; } // heavier = less knockback taken
 
   mount(container) {
+    this.puppet = new Puppet(this);
     this.el = document.createElement('div');
     this.el.className = `fighter ${this.side}`;
     this.el.innerHTML = `
       <div class="comboPopup"></div>
-      <div class="leanWrap"><div class="rigWrap"><div class="flipSpin">${rigSVG(this.ch)}</div></div></div>
+      <div class="leanWrap"><div class="rigWrap"><div class="flipSpin">${this.puppet.markup()}</div></div></div>
       <div class="platform"></div>`;
     container.appendChild(this.el);
     const q = sel => this.el.querySelector(sel);
     this.rig = {
       combo: q('.comboPopup'), lean: q('.leanWrap'), rigWrap: q('.rigWrap'), flipSpin: q('.flipSpin'),
-      svg: q('.rig'), torso: q('.torsoG'),
-      armFU: q('.armFrontUpper'), armFL: q('.armFrontLower'),
-      armBU: q('.armBackUpper'), armBL: q('.armBackLower'),
-      legFU: q('.legFrontUpper'), legFL: q('.legFrontLower'),
-      legBU: q('.legBackUpper'), legBL: q('.legBackLower'),
-      mouthOpen: q('.mouthOpen'), mouthNeutral: q('.mouthNeutral')
+      svg: q('.rig'), mouthOpen: q('.mouthOpen'), mouthNeutral: q('.mouthNeutral')
     };
+    this.puppet.bind(this.rig.svg);
   }
 
   reset(x) {
@@ -354,12 +156,8 @@ export class Fighter {
     this._nextShiftAt = this.timeSec + 2 + Math.random() * 3;
     this._shiftPulseStart = undefined;
     if (this.rig.flipSpin) this.rig.flipSpin.style.animation = 'none';
-    ['armFU', 'armFL', 'armBU', 'armBL', 'legFU', 'legFL', 'legBU', 'legBL', 'rigWrap'].forEach(k => {
-      const node = this.rig[k];
-      if (!node) return;
-      node.style.transform = '';
-      node._prevRot = 0; node._prevSx = undefined; node._prevSy = undefined;
-    });
+    if (this.puppet) this.puppet.reset();
+    if (this.rig.lean) { this.rig.lean.style.transform = ''; this.rig.lean._prevRot = 0; this.rig.lean.dataset.lean = '0'; }
     this.el.classList.remove('hitflash', 'dashing', 'flipping', 'blocking', 'attack-punch', 'attack-kick',
       'attack-heavy', 'attack-lowkick', 'aerial', 'jump', 'ko', 'launched', 'downed', 'rolling', 'wallsplat');
   }
@@ -797,13 +595,11 @@ export class Fighter {
     el.classList.toggle('flipping', this.state === 'flip');
     el.classList.toggle('ko', this.state === 'ko');
 
-    // ---- Whole-body lean: velocity sway + idle weight-shift + attack anticipation/drive
-    // + a decaying hit-reaction impulse, layered additively then smoothed. This lives on
-    // .leanWrap — one level outside the SVG's own torsoG, which CSS keyframes drive during
-    // attacks/blocks — so nothing here ever fights a CSS animation. ----
+    // ---- Whole-body lean: velocity sway + idle weight-shift + a decaying hit-reaction
+    // impulse, smoothed, on .leanWrap. The limbs themselves are posed by the puppet. ----
     let lean = -this.vx * 0.045;
 
-    if ((this.state === 'idle' || this.state === 'walk') && !this.ikPunch) {
+    if (this.state === 'idle' || this.state === 'walk') {
       const sp = pose.swaySpeed;
       let sway = Math.sin((t + this._idleSeed) * 1.6 * sp) * 1.1 * pose.swayAmp
                + Math.sin((t + this._idleSeed) * 0.55 * sp) * 1.8 * pose.swayAmp;
@@ -815,20 +611,6 @@ export class Fighter {
       if (this._shiftPulseStart !== undefined) {
         const sp2 = t - this._shiftPulseStart;
         if (sp2 >= 0 && sp2 < 0.4) lean += Math.sin(sp2 / 0.4 * Math.PI) * 3 * this.facing;
-      }
-    }
-
-    if (this.state === 'attack' && this.attackPhase && this.attackDurations) {
-      const durs = this.attackDurations, elapsed = t - this.attackPhaseStart;
-      if (this.attackPhase === 'startup') {
-        const frac = Math.min(1, elapsed / durs.startup);
-        lean += -this.facing * 3.5 * (1 - frac); // brief coil backward before the strike
-      } else if (this.attackPhase === 'active') {
-        lean += this.facing * 5.5; // drive the whole body through the hit
-      } else if (this.attackPhase === 'recovery') {
-        const rd = durs.recovery[this.attackOutcome] || durs.recovery.whiff;
-        const frac = Math.min(1, elapsed / rd);
-        lean += this.facing * 5.5 * (1 - frac); // settle back to neutral
       }
     }
 
@@ -847,95 +629,12 @@ export class Fighter {
     const curLean = parseFloat(r.lean.dataset.lean || '0');
     const nextLean = curLean + (lean - curLean) * Math.min(1, dt * 14);
     r.lean.dataset.lean = nextLean;
-    setRot(r.lean, nextLean, 2);
-    if (jitterPx) { // hit-stop victim shake, layered on the lean
-      r.lean.style.transform = `translateX(${jitterPx.toFixed(1)}px) rotate(${nextLean.toFixed(2)}deg)`;
-      r.lean._prevRot = NaN; // force setRot to rewrite next frame
-    }
+    // Hit-stop victim shake is layered on the lean. Skip the write when nothing changed.
+    const lt = `translateX(${(jitterPx || 0).toFixed(1)}px) rotate(${nextLean.toFixed(2)}deg)`;
+    if (r.lean._t !== lt) { r.lean._t = lt; r.lean.style.transform = lt; }
 
-    // ---- Landing squash / impact recoil — rigWrap is otherwise untouched by CSS or JS. ----
-    let sx = 1, sy = 1;
-    if (this.state === 'landing') {
-      const p = Math.min(1, Math.max(0, (t - (this.landingUntil - LANDING_RECOVERY)) / LANDING_RECOVERY));
-      const wob = Math.sin(p * Math.PI) * (pose.weight || 1);
-      sx = 1 + wob * 0.16; sy = 1 - wob * 0.14;
-    }
-    const prevSx = r.rigWrap._prevSx, prevSy = r.rigWrap._prevSy;
-    if (prevSx === undefined || Math.abs(sx - prevSx) > 0.003 || Math.abs(sy - prevSy) > 0.003) {
-      r.rigWrap._prevSx = sx; r.rigWrap._prevSy = sy;
-      r.rigWrap.style.transform = (sx === 1 && sy === 1) ? '' : `scale(${sx.toFixed(3)},${sy.toFixed(3)})`;
-    }
-
-    // ---- Legs: walk cycle owns all four; a grounded kick gets a support-leg weight
-    // transfer on the back leg while CSS drives the striking front leg via the
-    // attack-kick/attack-lowkick classes; everything else releases control back to the
-    // base rig pose or other CSS rules (block, jump). ----
-    if (this.state === 'walk') {
-      this.walkPhase += dt * (6 + Math.abs(this.vx) * 0.02);
-      const swing = Math.sin(this.walkPhase) * 26;
-      setRot(r.legFU, swing);
-      setRot(r.legBU, -swing);
-      setRot(r.legFL, Math.max(0, -swing * 0.6));
-      setRot(r.legBL, Math.max(0, swing * 0.6));
-    } else {
-      clearRot(r.legFU); clearRot(r.legFL);
-      const kicking = this.state === 'attack' && this.grounded &&
-        (this.attackType === 'kick' || this.attackType === 'lowkick') && this.attackDurations;
-      if (kicking) {
-        const durs = this.attackDurations, elapsed = t - this.attackPhaseStart;
-        let p = 0;
-        if (this.attackPhase === 'startup') p = elapsed / durs.startup;
-        else if (this.attackPhase === 'active') p = 1;
-        else if (this.attackPhase === 'recovery') {
-          const rd = durs.recovery[this.attackOutcome] || durs.recovery.whiff;
-          p = 1 - Math.min(1, elapsed / rd);
-        }
-        const bend = Math.sin(Math.min(1, Math.max(0, p)) * Math.PI * 0.5) * 22;
-        setRot(r.legBU, bend * 0.7);
-        setRot(r.legBL, -bend * 0.9);
-      } else {
-        clearRot(r.legBU); clearRot(r.legBL);
-      }
-    }
-
-    // ---- Front arm: IK owns it mid-punch/rush (unchanged math — the arm's rest geometry
-    // was left untouched specifically so this still tracks accurately); a subtle idle sway
-    // otherwise; CSS/base rig pose owns it during block, kicks, and flips. ----
-    if (this.ikPunch) {
-      const p = (this.timeSec - this.ikPunch.start) / this.ikPunch.dur;
-      if (p >= 1) {
-        clearRot(r.armFU); clearRot(r.armFL); this.ikPunch = null;
-      } else {
-        const target = sampleHand(PUNCH_KEYS, Math.max(0, p));
-        const sol = armIK.solve(ARM_ROOT, target, 1);
-        const upperDeg = (sol.upperAngle - ARM_REST_U) * 180 / Math.PI;
-        const lowerDeg = ((sol.lowerAngle - ARM_REST_L) * 180 / Math.PI) - upperDeg;
-        setRot(r.armFU, upperDeg);
-        setRot(r.armFL, lowerDeg);
-      }
-    } else if (this.state === 'idle') {
-      const m = Math.sin((t + this._idleSeed) * 1.8 * pose.swaySpeed) * 2.2 * pose.swayAmp;
-      setRot(r.armFU, m);
-      setRot(r.armFL, m * 0.5);
-    } else {
-      clearRot(r.armFU); clearRot(r.armFL);
-    }
-
-    // ---- Back arm: counter-rotates for a punch/rush's hip-and-shoulder drive (the classic
-    // "rear hand pulls back as the lead hand fires" mechanic); idle sway otherwise; CSS
-    // owns it during block. ----
-    if (this.ikPunch && (this.attackType === 'punch' || this.attackType === 'rush')) {
-      const p = Math.max(0, Math.min(1, (t - this.ikPunch.start) / this.ikPunch.dur));
-      const swing = p < 0.55 ? -(p / 0.55) * 26 : -26 * (1 - (p - 0.55) / 0.45);
-      setRot(r.armBU, swing);
-      setRot(r.armBL, swing * 0.6);
-    } else if (this.state === 'idle') {
-      const m = Math.sin((t + this._idleSeed) * 1.8 * pose.swaySpeed + 1.4) * 2.6 * pose.swayAmp;
-      setRot(r.armBU, m);
-      setRot(r.armBL, m * 0.5);
-    } else {
-      clearRot(r.armBU); clearRot(r.armBL);
-    }
+    // Limbs, torso and head: keyed, eased skeletal animation (puppet.js).
+    this.puppet.update(dt);
 
     // Mouth: bare teeth mid-swing / on hit reaction
     const shout = this.state === 'attack' || this.state === 'hitstun';
