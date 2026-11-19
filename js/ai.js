@@ -10,17 +10,17 @@ const TIERS = {
   easy: {
     reactionMs: [420, 620], blockChance: 0.28, punishChance: 0.15,
     preferredGap: [70, 110], aggression: 0.35, mistakeRate: 0.30,
-    comboChance: 0.25, dashChance: 0.10, spacingSkill: 0.3, techChance: 0.1
+    comboChance: 0.25, dashChance: 0.10, spacingSkill: 0.3, techChance: 0.1, superChance: 0.25, throwChance: 0.12
   },
   medium: {
     reactionMs: [260, 400], blockChance: 0.5, punishChance: 0.4,
     preferredGap: [55, 90], aggression: 0.55, mistakeRate: 0.15,
-    comboChance: 0.5, dashChance: 0.22, spacingSkill: 0.6, techChance: 0.35
+    comboChance: 0.5, dashChance: 0.22, spacingSkill: 0.6, techChance: 0.35, superChance: 0.5, throwChance: 0.3
   },
   hard: {
     reactionMs: [110, 210], blockChance: 0.74, punishChance: 0.7,
     preferredGap: [45, 80], aggression: 0.75, mistakeRate: 0.04,
-    comboChance: 0.8, dashChance: 0.35, spacingSkill: 0.9, techChance: 0.7
+    comboChance: 0.8, dashChance: 0.35, spacingSkill: 0.9, techChance: 0.7, superChance: 0.85, throwChance: 0.55
   }
 };
 
@@ -30,7 +30,7 @@ const REFLEX_RANGE = 130;  // px within which the CPU reacts to a telegraphed at
 export class AI {
   constructor(difficulty = 'medium') {
     this.tier = TIERS[difficulty] || TIERS.medium;
-    this.decision = { left: false, right: false, jump: false, punch: false, kick: false, block: false };
+    this.decision = { left: false, right: false, jump: false, punch: false, kick: false, block: false, super: false };
     this.reset();
   }
 
@@ -56,7 +56,7 @@ export class AI {
     const t = this.tier;
     // One-shot actions last a single frame; held movement and guard persist.
     this.dashDir = 0;
-    d.jump = false; d.punch = false; d.kick = false; d.block = false;
+    d.jump = false; d.punch = false; d.kick = false; d.block = false; d.super = false;
 
     const dist = Math.abs(self.x - opp.x);
     const facing = self.x < opp.x ? 1 : -1;
@@ -153,7 +153,18 @@ export class AI {
       d.punch = !d.kick;
     }
 
+    // Throw a turtling opponent.
+    if (canAct && opp.state === 'block' && dist < 75 && rng.next() < t.throwChance) {
+      d.block = true; d.punch = true; d.kick = false;
+    }
+
+    // Super when the meter is full and the opponent is in reach (best as a punish).
+    if (canAct && self.superReady && dist < self.superMove.range - 15) {
+      const punish = opp.state === 'attack' && opp.attackPhase === 'recovery';
+      if (rng.next() < t.superChance * (punish ? 1.5 : 0.6)) { d.super = true; d.punch = false; d.kick = false; d.block = false; }
+    }
+
     // Committing to an attack ends this window's walk.
-    if (d.punch || d.kick) { this.moveDir = 0; this.moveGoal = 0; }
+    if (d.punch || d.kick || d.super) { this.moveDir = 0; this.moveGoal = 0; }
   }
 }

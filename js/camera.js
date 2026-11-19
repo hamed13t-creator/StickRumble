@@ -5,8 +5,14 @@
 // time and differ per device without affecting the match.
 import { WORLD_W, GROUND_Y, STAGE_W } from './world.js';
 
-const MIN_VIEW = 340;
+// Zoom is deliberately small: from the wide view (about 1x) to at most ~1.3x when the
+// fighters are close. Hits never zoom in further, so the action stays in frame.
+const MIN_VIEW = 760;
 const MAX_VIEW = 980; // wide enough to frame both fighters at their round-start spacing
+const SIDE_MARGIN = 150;   // world px kept free beyond each fighter
+const FIGHTER_H = 130;     // world px from the feet to above the head (incl. headroom)
+const TOP_MARGIN = 34;     // screen px kept free above the highest fighter
+const LIFT_RATE = 9;
 const START_VIEW = MAX_VIEW;
 
 const ZOOM_RATE = 6.0;
@@ -14,13 +20,13 @@ const PAN_RATE = 10.5;
 const TRAUMA_DECAY = 2.6;
 
 const SHAKE_X = 14, SHAKE_Y = 8;
-const PUNCH_ZOOM = 46;
+const PUNCH_ZOOM = 0; // no zoom-in on hits (it cut off the fighter being knocked back)
 const PUNCH_ZOOM_ATTACK = 30;
 const PUNCH_ZOOM_RELEASE = 7;
 // Directional kick: a spring-loaded offset along the hit direction, plus a brief pull of
 // the framing toward the impact point.
 const KICK_STIFFNESS = 520, KICK_DAMPING = 30; // slightly under-damped: one small overshoot
-const FOCUS_PULL = 0.18, FOCUS_RELEASE = 9;
+const FOCUS_PULL = 0, FOCUS_RELEASE = 9;
 
 function smoothing(rate, dt) {
   return 1 - Math.exp(-rate * dt);
@@ -40,6 +46,7 @@ export class Camera {
     this.kickX = 0; this.kickV = 0;      // directional recoil offset (screen px) and its velocity
     this.focusX = 0;                     // world-px pull of the framing toward the last impact
     this.motionScale = 1;                // 0.5 under prefers-reduced-motion
+    this.liftY = 0;                      // screen px the view is lowered to keep airborne fighters in frame
   }
 
   setMotionScale(s) { this.motionScale = s; }
@@ -53,7 +60,7 @@ export class Camera {
     this.punchZoom = 0;
     this._shakeT = 0;
     this._shakeSeed = Math.random() * 10;
-    this.kickX = 0; this.kickV = 0; this.focusX = 0;
+    this.kickX = 0; this.kickV = 0; this.focusX = 0; this.liftY = 0;
   }
 
   shake(magnitude) {
@@ -72,8 +79,15 @@ export class Camera {
 
     const midX = (fighterA.x + fighterB.x) / 2;
     const dist = Math.abs(fighterA.x - fighterB.x);
-    const targetView = Math.max(MIN_VIEW, Math.min(MAX_VIEW, dist * 1.9 + 220));
+    // Keep both fighters (and their height in the air) in frame: widen for distance,
+    // and widen further when someone is high up so they fit under the top of the screen.
+    const topH = Math.max(fighterA.y || 0, fighterB.y || 0) + FIGHTER_H;
+    const fitHeightView = STAGE_W * topH / (GROUND_Y - TOP_MARGIN);
+    const targetView = Math.max(MIN_VIEW, Math.min(MAX_VIEW, Math.max(dist + SIDE_MARGIN * 2, fitHeightView)));
     this.viewW += (targetView - this.viewW) * smoothing(ZOOM_RATE, dt);
+    // If even the widest view can't fit a high jump/launch, lower the view instead.
+    const needLift = Math.max(0, topH * (STAGE_W / this.viewW) - (GROUND_Y - TOP_MARGIN));
+    this.liftY += (needLift - this.liftY) * smoothing(LIFT_RATE, dt);
 
     const halfView = this.viewW / 2;
     const clampedMid = Math.max(halfView, Math.min(WORLD_W - halfView, midX + this.focusX));
@@ -110,7 +124,7 @@ export class Camera {
   applyTransform() {
     const zoom = this.getZoom();
     const e = STAGE_W / 2 - this.centerX * zoom + this.shakeX + this.kickX;
-    const f = GROUND_Y * (1 - zoom) + this.shakeY;
+    const f = GROUND_Y * (1 - zoom) + this.shakeY + this.liftY;
     this.worldEl.style.transform = `matrix(${zoom},0,0,${zoom},${e.toFixed(2)},${f.toFixed(2)})`;
     return zoom;
   }

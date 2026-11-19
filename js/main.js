@@ -5,7 +5,7 @@
 // integer match.frame; rendering (fighters, camera, background) runs once per display
 // frame. Every gameplay timer, including the round-flow banners, counts sim frames, so
 // pausing freezes all of it and the same seed + inputs replay the same match.
-import { Fighter, CHARACTERS, rigSVG, NEUTRAL_INPUT } from './fighter.js';
+import { Fighter, CHARACTERS, rigSVG, NEUTRAL_INPUT, METER_MAX } from './fighter.js';
 import { Camera } from './camera.js';
 import { ParallaxBackground, streetFloorSVG } from './background.js';
 import { AI } from './ai.js';
@@ -44,6 +44,25 @@ const cpuCharNameEl = document.getElementById('cpuCharName');
 const youPipsEl = document.getElementById('youPips');
 const cpuPipsEl = document.getElementById('cpuPips');
 const controlsRoot = document.getElementById('controls');
+const $ = id => document.getElementById(id);
+const youTrailEl = $('youTrail'), cpuTrailEl = $('cpuTrail');
+const youMeterEl = $('youMeter'), cpuMeterEl = $('cpuMeter');
+const youComboEl = $('youCombo'), cpuComboEl = $('cpuCombo');
+const superBtn = $('superBtn'), nextBtn = $('nextBtn');
+const howScreen = $('howScreen');
+
+// ---------------- Saved progress (arcade best, stars, unlocks) ----------------
+const SAVE_KEY = 'stickrumble.progress.v1';
+function loadProgress() {
+  try { return Object.assign({ best: 0, stars: {}, gold: false }, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); }
+  catch (_) { return { best: 0, stars: {}, gold: false }; }
+}
+function saveProgress() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(progress)); } catch (_) {} }
+const progress = loadProgress();
+let mode = 'quick';          // 'quick' | 'arcade'
+let headband = 'blue';       // 'blue' | 'gold' (gold unlocks after an arcade clear)
+let arcade = null;           // { order: [cpu keys], stage: 0..4 } during an arcade run
+const ARCADE_DIFF = ['easy', 'medium', 'medium', 'hard', 'hard'];
 
 // ---------------- Select-screen state ----------------
 let pickedKey = CHARACTERS[0].key;
@@ -52,14 +71,32 @@ let difficulty = 'medium';
 CHARACTERS.forEach(ch => {
   const b = document.createElement('button');
   b.className = 'charBtn';
-  b.innerHTML = rigSVG(ch) + `<div class="cname">${ch.name}</div>`;
+  b.innerHTML = rigSVG(ch) + `<div class="cname">${ch.name}</div><div class="star"></div>`;
   b.addEventListener('click', () => { pickedKey = ch.key; refreshCharSelection(); });
   charGrid.appendChild(b);
 });
 function refreshCharSelection() {
-  [...charGrid.children].forEach((b, i) => b.classList.toggle('sel', CHARACTERS[i].key === pickedKey));
+  [...charGrid.children].forEach((b, i) => {
+    b.classList.toggle('sel', CHARACTERS[i].key === pickedKey);
+    b.classList.toggle('goldBand', headband === 'gold');
+    b.querySelector('.star').textContent = progress.stars[CHARACTERS[i].key] ? '★' : '';
+  });
+  $('arcadeBest').textContent = progress.best ? `(best ${progress.best}/5)` : '';
+  $('colorRow').hidden = !progress.gold;
 }
 refreshCharSelection();
+document.querySelectorAll('.modeBtn').forEach(btn => btn.addEventListener('click', () => {
+  mode = btn.dataset.mode;
+  document.querySelectorAll('.modeBtn').forEach(b => b.classList.toggle('active', b === btn));
+  diffRow.parentElement.style.opacity = mode === 'arcade' ? '.45' : ''; // arcade sets its own difficulty
+}));
+document.querySelectorAll('.colorBtn').forEach(btn => btn.addEventListener('click', () => {
+  headband = btn.dataset.color;
+  document.querySelectorAll('.colorBtn').forEach(b => b.classList.toggle('active', b === btn));
+  refreshCharSelection();
+}));
+$('howBtn').addEventListener('click', () => howScreen.classList.add('open'));
+$('howCloseBtn').addEventListener('click', () => howScreen.classList.remove('open'));
 
 diffRow.querySelectorAll('.diffBtn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -169,7 +206,17 @@ const HAPTIC_MS = { punch: 8, kick: 16, lowkick: 14, rush: 30, aerialKick: 24, b
 const SPARKS = { punch: 9, kick: 15, lowkick: 12, rush: 22, aerialKick: 18, block: 8 };
 const STREAKS = { punch: 0, kick: 2, lowkick: 2, rush: 5, aerialKick: 4, block: 0 };
 const BLOOD = { punch: 0.9, kick: 1.5, lowkick: 1.2, rush: 2.4, aerialKick: 2 };
-const IMPACT = { punch: 0.6, kick: 1, lowkick: 0.85, rush: 1.6, aerialKick: 1.3 };
+const IMPACT = { punch: 0.6, kick: 1, lowkick: 0.85, rush: 1.6, aerialKick: 1.3, super: 2.2, throw: 1.1 };
+Object.assign(SHAKE, { super: 0.8, throw: 0.4 });
+Object.assign(HITSTOP_FRAMES, { super: 16, throw: 7 });
+Object.assign(KICK_PX, { super: 18, throw: 10 });
+Object.assign(HAPTIC_MS, { super: 50, throw: 25 });
+Object.assign(SPARKS, { super: 30, throw: 8 });
+Object.assign(STREAKS, { super: 7, throw: 0 });
+Object.assign(BLOOD, { super: 2.8, throw: 1 });
+const SUPER_FREEZE_FRAMES = 30;   // the whole fight pauses while the super is announced
+const CROWD_BOUNCE_FREEZE = 6;
+const KO_SLOWMO = 0.3;            // time scale while the KO plays out (pacing only, not the sim)
 
 // Freeze the whole simulation (both fighters, AI, round clock) for n sim frames. Called
 // from dispatchEvents, which runs inside stepSim on deterministic events, so the freeze
@@ -181,10 +228,35 @@ function freezeSim(frames, victim) {
   match.hitStopVictim = victim || null;
 }
 
-function updateHealthBars() {
+function updateHealthBars(instant = false) {
   if (!p1 || !p2) return;
-  youHealthEl.style.width = Math.max(0, (p1.health / p1.maxHealth) * 100).toFixed(1) + '%';
-  cpuHealthEl.style.width = Math.max(0, (p2.health / p2.maxHealth) * 100).toFixed(1) + '%';
+  const a = Math.max(0, (p1.health / p1.maxHealth) * 100).toFixed(1) + '%';
+  const b = Math.max(0, (p2.health / p2.maxHealth) * 100).toFixed(1) + '%';
+  youHealthEl.style.width = a; cpuHealthEl.style.width = b;
+  // The pale trail follows after a short delay (CSS), showing the chunk just lost.
+  for (const [el, w] of [[youTrailEl, a], [cpuTrailEl, b]]) {
+    if (instant) { el.style.transition = 'none'; el.style.width = w; void el.offsetWidth; el.style.transition = ''; }
+    else el.style.width = w;
+  }
+}
+// Super meters and the SUPER button (render-only; only touches the DOM on change).
+let shownMeters = [-1, -1], shownReady = null;
+function updateMeters() {
+  if (!p1 || !p2) return;
+  [[p1, youMeterEl, 0], [p2, cpuMeterEl, 1]].forEach(([f, el, i]) => {
+    const v = Math.round(f.meter);
+    if (v === shownMeters[i]) return;
+    shownMeters[i] = v;
+    el.style.width = (v / METER_MAX * 100) + '%';
+    el.parentElement.classList.toggle('full', f.meter >= METER_MAX);
+  });
+  const ready = p1.meter >= METER_MAX;
+  if (ready !== shownReady) { shownReady = ready; superBtn.classList.toggle('ready', ready); }
+}
+function showCombo(el, chain, dmg) {
+  el.querySelector('b').textContent = chain + ' HITS';
+  el.querySelector('span').textContent = Math.round(dmg) + ' DMG';
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
 }
 
 function buildPips(container) {
@@ -218,16 +290,9 @@ function dispatchEvents(fighter, opp) {
         else if (BLOOD[tier]) { FX.spawnBlood(ev.x, ev.y, ev.dirX, BLOOD[tier]); if (Math.random() < 0.5) FX.spawnBloodDecal(ev.x, GROUND_Y, ev.dirX, 0.7); }
         hype(tier === 'rush' || tier === 'aerialKick' ? 0.25 : 0.08);
         Audio.play(tier === 'rush' ? 'special' : (tier.includes('kick') ? 'kick' : 'punch'));
-        if (tier === 'rush') Audio.play('splatter');
-        if (fighter.comboCount >= 2) {
-          const el = fighter.rig.combo;
-          el.textContent = fighter.comboCount + 'x COMBO!';
-          requestAnimationFrame(() => {
-            el.classList.remove('show');
-            void el.offsetWidth;
-            el.classList.add('show');
-          });
-        }
+        if (tier === 'rush' || tier === 'super') Audio.play('splatter');
+        if (ev.chain >= 2) showCombo(fighter === p1 ? youComboEl : cpuComboEl, ev.chain, ev.chainDmg);
+        if (ev.chain >= 3) Audio.play('crowdReact', 0.8 + ev.chain * 0.1);
         // Crowd reacts to heavy blows (rush tier) OR a 3x+ combo, whichever is stronger.
         const comboIntensity = fighter.comboCount >= 3 ? Math.min(1 + (fighter.comboCount - 3) * 0.15, 2.2) : 0;
         const heavyIntensity = tier === 'rush' ? 1.4 : 0;
@@ -249,6 +314,28 @@ function dispatchEvents(fighter, opp) {
         haptic(HAPTIC_MS.block);
         FX.spawnSparks(ev.x, ev.y, '#7fffd4', SPARKS.block, 1);
         Audio.play('block');
+        break;
+      case 'super':
+        // Super activation: the fight freezes, the screen dims behind the fighters and
+        // the move's name is called out.
+        freezeSim(SUPER_FREEZE_FRAMES, null);
+        match.superFlashUntil = match.frame + SUPER_FREEZE_FRAMES;
+        camera.shake(0.25);
+        haptic(30);
+        Audio.play('special'); Audio.play('chant');
+        background.pulse(2); hype(0.4);
+        FX.spawnImpact(ev.x, ev.y, '#ffcf4d', 1.6);
+        showBanner(ev.name + '!', { cls: 'super', hold: 650 });
+        break;
+      case 'crowdbounce':
+        camera.shake(0.45);
+        camera.impact(ev.x, -ev.side, KICK_PX.wallsplat);
+        freezeSim(CROWD_BOUNCE_FREEZE, fighter);
+        haptic(30);
+        FX.spawnCrowdShove(ev.x, ev.y, ev.side);
+        FX.spawnDust(ev.x, GROUND_Y, 0.6);
+        Audio.play('land'); Audio.play('ooh', 1.3); Audio.play('crowdReact', 1.8);
+        background.pulse(2.2); hype(0.35);
         break;
       case 'whoosh': Audio.play('whoosh'); break;
       case 'dash': FX.spawnAfterimage(fighter.el, fighter.ch.color); Audio.play('dash'); break;
@@ -403,6 +490,8 @@ function startMatch(p1Key, p2Key, diff) {
   p2 = new Fighter(p2Key, 'p2', false);
   p1.mount(worldEl);
   p2.mount(worldEl);
+  p1.el.classList.toggle('goldBand', headband === 'gold');
+  shownMeters = [-1, -1]; shownReady = null;
   mountWalls();
   mountStreet();
 
@@ -423,7 +512,7 @@ function startMatch(p1Key, p2Key, diff) {
     roundActive: false, matchOver: false, paused: false,
     timeLeft: ROUND_TIME, frame: 0, waits: [],
     roundEndFrame: -1, pendingWinner: null,
-    hitStopFrames: 0, hitStopTotal: 0, hitStopVictim: null, frozenSample: null,
+    hitStopFrames: 0, hitStopTotal: 0, hitStopVictim: null, frozenSample: null, superFlashUntil: 0,
     arena: { min: ARENA_MIN_X, max: ARENA_MAX_X }, suddenDeath: null
   };
   // Both fighters share the match's bounds object, so moving walls apply to both.
@@ -446,7 +535,8 @@ async function runRoundIntro(myId) {
   camera.reset();
   match.roundEndFrame = -1;
   match.pendingWinner = null;
-  match.hitStopFrames = 0; match.hitStopVictim = null; match.frozenSample = null;
+  match.hitStopFrames = 0; match.hitStopVictim = null; match.frozenSample = null; match.superFlashUntil = 0;
+  document.body.classList.remove('superflash');
   match.arena.min = ARENA_MIN_X; match.arena.max = ARENA_MAX_X; match.suddenDeath = null;
   document.body.classList.remove('suddendeath', 'hitstop');
   timerEl.classList.remove('danger');
@@ -454,7 +544,7 @@ async function runRoundIntro(myId) {
   const mp1 = match.p1Rounds === ROUNDS_TO_WIN - 1, mp2 = match.p2Rounds === ROUNDS_TO_WIN - 1;
   const mpLabel = (mp1 && mp2) || match.round >= MAX_ROUNDS ? 'FINAL ROUND' : (mp1 || mp2) ? 'MATCH POINT' : null;
   document.body.classList.toggle('matchpoint', !!mpLabel);
-  updateHealthBars();
+  updateHealthBars(true);
   Audio.play('bell');
   await showBanner(`ROUND ${match.round}`, { hold: 900 });
   if (!match || match.id !== myId) return;
@@ -496,6 +586,8 @@ async function endRound(reason, winnerSide) {
   }
 
   if (winnerSide) {
+    (winnerSide === 'p1' ? p1 : p2).victory = true; // winner's pose while the banners play
+    Audio.play('cheer', 1.2);
     match[winnerSide === 'p1' ? 'p1Rounds' : 'p2Rounds']++;
     setPips(youPipsEl, match.p1Rounds);
     setPips(cpuPipsEl, match.p2Rounds);
@@ -533,6 +625,29 @@ function endMatch(winnerSide) {
   pauseOverlay.style.display = 'none'; // never leave a pause overlay under the result
   const youWon = winnerSide === 'p1';
   resultText.textContent = youWon ? 'YOU WIN THE MATCH!' : 'CPU WINS THE MATCH!';
+  nextBtn.style.display = 'none';
+  restartBtn.textContent = 'Rematch';
+  if (arcade) {
+    if (youWon) {
+      arcade.stage++;
+      progress.best = Math.max(progress.best, arcade.stage);
+      if (arcade.stage >= arcade.order.length) {
+        const firstGold = !progress.gold;
+        progress.stars[match.p1Key] = true; progress.gold = true;
+        resultText.textContent = firstGold ? 'ARCADE CLEAR! ★ GOLD HEADBAND UNLOCKED' : 'ARCADE CLEAR! ★';
+        arcade = null;
+      } else {
+        const next = CHARACTERS.find(c => c.key === arcade.order[arcade.stage]);
+        resultText.textContent = `YOU WIN! ${arcade.stage}/${arcade.order.length}`;
+        nextBtn.textContent = `Next: ${next.name.toUpperCase()} (${ARCADE_DIFF[arcade.stage].toUpperCase()})`;
+        nextBtn.style.display = '';
+      }
+      saveProgress();
+    } else {
+      resultText.textContent = `ARCADE: LOST AT ${arcade.stage + 1}/${arcade.order.length}`;
+      restartBtn.textContent = 'Retry';
+    }
+  }
   background.pulse(3);
   FX.pulseClass(document.body, 'cheering', 1500);
   Audio.play('cheer', 2.2);
@@ -569,6 +684,8 @@ function exitToSelect() {
   selectScreen.style.display = 'flex';
   clearWorld();
   setScene(false);
+  arcade = null;
+  refreshCharSelection();
   unlockOrientation();
 }
 
@@ -583,6 +700,10 @@ restartBtn.addEventListener('click', () => {
   overlay.style.display = 'none';
   if (match) startMatch(match.p1Key, match.p2Key, match.diff);
 });
+nextBtn.addEventListener('click', () => {
+  overlay.style.display = 'none';
+  if (match && arcade) startMatch(match.p1Key, arcade.order[arcade.stage], ARCADE_DIFF[arcade.stage]);
+});
 changeBtn.addEventListener('click', exitToSelect);
 
 // Auto-pause if the tab/app is backgrounded mid-match.
@@ -595,19 +716,28 @@ fightBtn.addEventListener('click', () => {
   Audio.unlock(); // guaranteed real user gesture — reliable place to init the AudioContext
   lockLandscape();
   const others = CHARACTERS.filter(c => c.key !== pickedKey);
-  const cpuKey = (others.length ? others[Math.floor(Math.random() * others.length)] : CHARACTERS[0]).key;
   selectScreen.style.display = 'none';
   gameScreen.style.display = 'flex';
   fitStage();
+  if (mode === 'arcade') {
+    // Arcade ladder: every other fighter once, in a random order, getting harder.
+    const order = others.map(c => c.key);
+    for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+    arcade = { order, stage: 0 };
+    startMatch(pickedKey, order[0], ARCADE_DIFF[0]);
+    return;
+  }
+  arcade = null;
+  const cpuKey = (others.length ? others[Math.floor(Math.random() * others.length)] : CHARACTERS[0]).key;
   startMatch(pickedKey, cpuKey, difficulty);
 });
 
 // ---------------- Input sampling ----------------
 function toFighterInput(cur, edges) {
-  return { left: cur.left, right: cur.right, block: cur.block, kickHeld: cur.kick, jumpEdge: edges.jump, punchEdge: edges.punch, kickEdge: edges.kick, flipRequest: false };
+  return { left: cur.left, right: cur.right, block: cur.block, kickHeld: cur.kick, jumpEdge: edges.jump, punchEdge: edges.punch, kickEdge: edges.kick, flipRequest: false, superEdge: !!edges.super };
 }
 function computeEdges(cur, prev) {
-  const e = { jump: cur.jump && !prev.jump, punch: cur.punch && !prev.punch, kick: cur.kick && !prev.kick };
+  const e = { jump: cur.jump && !prev.jump, punch: cur.punch && !prev.punch, kick: cur.kick && !prev.kick, super: !!cur.super && !prev.super };
   Object.assign(prev, cur);
   return e;
 }
@@ -620,7 +750,7 @@ function samplePlayer() {
   return { input: inp, dash: dashEv ? dashEv.dir : 0 };
 }
 function heldOnly(sample) {
-  return { input: { ...sample.input, jumpEdge: false, punchEdge: false, kickEdge: false, flipRequest: false }, dash: 0 };
+  return { input: { ...sample.input, jumpEdge: false, punchEdge: false, kickEdge: false, flipRequest: false, superEdge: false }, dash: 0 };
 }
 // Presses made during a hit-stop freeze are kept and delivered on the first step after it.
 function mergeSamples(older, newer) {
@@ -629,7 +759,7 @@ function mergeSamples(older, newer) {
   const a = older.input, b = newer.input;
   return {
     input: { ...b, jumpEdge: a.jumpEdge || b.jumpEdge, punchEdge: a.punchEdge || b.punchEdge,
-      kickEdge: a.kickEdge || b.kickEdge, flipRequest: a.flipRequest || b.flipRequest },
+      kickEdge: a.kickEdge || b.kickEdge, flipRequest: a.flipRequest || b.flipRequest, superEdge: a.superEdge || b.superEdge },
     dash: older.dash || newer.dash
   };
 }
@@ -750,8 +880,12 @@ function loop(ts) {
   if (!match || match.matchOver || match.paused) { lastFrameTime = 0; stepAccumulator = 0; return; }
 
   if (!lastFrameTime) lastFrameTime = ts;
-  const elapsed = Math.min((ts - lastFrameTime) / 1000, MAX_STEPS_PER_FRAME * STEP);
+  const realElapsed = Math.min((ts - lastFrameTime) / 1000, MAX_STEPS_PER_FRAME * STEP);
   lastFrameTime = ts;
+  // KO slow motion: while the knockout plays out, the fixed-step sim simply runs fewer
+  // steps per real second. Pacing only: the steps themselves are unchanged.
+  const slowmo = match.roundEndFrame >= 0 && match.frame < match.roundEndFrame && !reducedMotion;
+  const elapsed = realElapsed * (slowmo ? KO_SLOWMO : 1);
   stepAccumulator += elapsed;
 
   const steps = Math.min(MAX_STEPS_PER_FRAME, Math.floor(stepAccumulator / STEP + 1e-9));
@@ -771,6 +905,8 @@ function loop(ts) {
   // in place, fading out over the freeze.
   const frozen = match.hitStopFrames > 0;
   document.body.classList.toggle('hitstop', frozen);
+  document.body.classList.toggle('superflash', match.frame < match.superFlashUntil);
+  updateMeters();
   let jitter = 0;
   if (frozen) {
     renderTick++;

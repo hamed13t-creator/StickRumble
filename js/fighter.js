@@ -45,8 +45,24 @@ const ATTACK = {
   kick:  { startup: 0.14, active: 0.08, recovery: { hit: 0.18, block: 0.32, whiff: 0.46 }, dmg: 13, range: 120, kb: 170 },
   lowkick: { startup: 0.10, active: 0.07, recovery: { hit: 0.15, block: 0.26, whiff: 0.34 }, dmg: 10, range: 108, kb: 130 },
   rush:  { startup: 0.06, active: 0.10, recovery: { hit: 0.16, block: 0.26, whiff: 0.32 }, dmg: 20, range: 130, kb: 220 },
-  aerialKick: { startup: 0.08, active: 0.10, recovery: { hit: 0.14, block: 0.24, whiff: 0.30 }, dmg: 18, range: 130, kb: 200 }
+  aerialKick: { startup: 0.08, active: 0.10, recovery: { hit: 0.14, block: 0.24, whiff: 0.30 }, dmg: 18, range: 130, kb: 200 },
+  // Throw (GUARD + PUNCH up close): beats a blocking opponent, can't be blocked, but a
+  // whiffed throw leaves you open.
+  throw: { startup: 0.07, active: 0.05, recovery: { hit: 0.26, block: 0.45, whiff: 0.45 }, dmg: 14, range: 80, kb: 0 },
+  // Super move (full meter): armoured during startup, launches, chips through guard.
+  super: { startup: 0.14, active: 0.14, recovery: { hit: 0.30, block: 0.50, whiff: 0.55 }, dmg: 30, range: 150, kb: 300 }
 };
+// One super per character. style picks the animation; lunge is forward speed (px/s)
+// during startup + active; range is how far the blow reaches at the moment it lands.
+export const SUPERS = {
+  boxer:     { name: 'HAYMAKER',      style: 'punch', lunge: 520, range: 150, dmg: 30 },
+  ninja:     { name: 'SHADOW STRIKE', style: 'punch', lunge: 900, range: 150, dmg: 27 },
+  sumo:      { name: 'SUMO CHARGE',   style: 'punch', lunge: 700, range: 140, dmg: 34 },
+  kickboxer: { name: 'TORNADO KICK',  style: 'kick',  lunge: 380, range: 165, dmg: 32 },
+  robot:     { name: 'ROCKET PUNCH',  style: 'punch', lunge: 0,   range: 240, dmg: 28 },
+  monk:      { name: 'PALM BLAST',    style: 'punch', lunge: 300, range: 195, dmg: 29 }
+};
+export const METER_MAX = 100;
 const GRAVITY = 2500, JUMP_V = 760, MOVE_ACCEL = 2400, MAX_SPEED = 250, AIR_CONTROL = 0.55;
 const GROUND_DECEL = 1900, DASH_SPEED = 880, DASH_TIME = 0.16, DASH_COOLDOWN = 0.55, DASH_IFRAME = 0.14;
 const FLIP_TIME = 0.46, BACKFLIP_TIME = 0.36, LANDING_RECOVERY = 0.09;
@@ -57,8 +73,8 @@ const DASH_FX_FRAMES = framesFor(DASH_TIME + 0.06);
 const ATK_CLASS_PAD_FRAMES = framesFor(0.04);
 const ALL_ATK_CLASSES = ['attack-punch', 'attack-kick', 'attack-heavy', 'attack-lowkick', 'aerial'];
 // ---- Knockdown / wall splat (Batch 1). Every duration is in whole sim frames. ----
-const KNOCKDOWN_TIERS = { rush: true, aerialKick: true };          // these launch + knock down
-const LAUNCH = { rush: { vx: 360, vy: 560 }, aerialKick: { vx: 300, vy: 470 } }; // px/s, before weight
+const KNOCKDOWN_TIERS = { rush: true, aerialKick: true, super: true, throw: true };          // these launch + knock down
+const LAUNCH = { rush: { vx: 360, vy: 560 }, aerialKick: { vx: 300, vy: 470 }, super: { vx: 470, vy: 600 }, throw: { vx: 300, vy: 560 } }; // px/s, before weight
 const KO_LAUNCH = { vx: 300, vy: 420 };                            // finishing blow sends the loser flying
 const KD_LIE_FRAMES = framesFor(0.5);      // lying on the floor (invulnerable)
 const KD_RISE_FRAMES = framesFor(0.3);     // getting up (invulnerable)
@@ -67,11 +83,17 @@ const TECH_ROLL_SPEED = 420;
 const WALL_SPLAT_SPEED = 200;              // px/s into the arena edge needed to splat
 const WALL_STICK_FRAMES = framesFor(0.25);
 const WALL_SLIDE_SPEED = 260;              // px/s down the wall after the stick
+// Crowd bounce: a launched fighter flying into the crowd at the arena edge gets shoved
+// back into the fight (once per launch) and can be hit again on the way.
+const CROWD_BOUNCE_SPEED = 150;            // px/s into the edge needed
+const CROWD_BOUNCE_VX = 340, CROWD_BOUNCE_VY = 430;
+// Meter gain per point of damage dealt / taken, and per blocked hit.
+const METER_GAIN_DEAL = 1.0, METER_GAIN_TAKE = 0.6, METER_GAIN_BLOCK = 3;
 const ROLL_ANIM_TIME = 0.33;
 
 // Input object used when a fighter must ignore control (KO'd, or round already decided).
 export const NEUTRAL_INPUT = Object.freeze({ left: false, right: false, block: false, kickHeld: false,
-  jumpEdge: false, punchEdge: false, kickEdge: false, flipRequest: false });
+  jumpEdge: false, punchEdge: false, kickEdge: false, flipRequest: false, superEdge: false });
 
 export class Fighter {
   constructor(charKey, side, isPlayer) {
@@ -86,6 +108,10 @@ export class Fighter {
     this.attackType = null; this.attackPhase = null; this.attackPhaseStart = 0;
     this.attackDurations = null; this.attackOutcome = null; this.bufferedAttack = null;
     this.comboBuffer = []; this.comboCount = 0; this.lastHitTime = -99; this.hits = 0;
+    this.chain = 0; this.chainDmg = 0;   // true combo: hits landed while the victim never recovered
+    this.meter = 0;                       // super meter, kept across rounds
+    this.bounceUsed = false; this.juggleable = false;
+    this.victory = false;                 // render-only: winner's pose after the round
     this.health = 100 * (this.ch.stats.health || 1);
     this.maxHealth = this.health;
     this.dashCooldownUntil = 0; this.invincibleUntil = 0; this.dashDir = 0;
@@ -122,6 +148,9 @@ export class Fighter {
 
   get timeSec() { return this.frame * STEP; }
   get weight() { return this.ch.pose.weight || 1; } // heavier = less knockback taken
+  get superMove() { return SUPERS[this.ch.key] || SUPERS.boxer; }
+  get superReady() { return this.meter >= METER_MAX; }
+  gainMeter(n) { this.meter = Math.min(METER_MAX, this.meter + n); }
 
   mount(container) {
     this.puppet = new Puppet(this);
@@ -144,6 +173,7 @@ export class Fighter {
     this.x = x; this.y = 0; this.vx = 0; this.vy = 0;
     this.health = this.maxHealth; this.state = 'idle'; this.grounded = true;
     this.attackType = null; this.attackPhase = null; this.comboCount = 0; this.comboBuffer = []; this.hits = 0;
+    this.chain = 0; this.chainDmg = 0; this.bounceUsed = false; this.juggleable = false; this.victory = false; this.rushAfter = false;
     this.hitstunUntil = 0; this.knockdownUntil = 0; this.invincibleUntil = 0; this.dashCooldownUntil = 0;
     this._dashUntil = 0; this.flipUntil = 0; this._flipStart = 0; this.landingUntil = 0; this.walkPhase = 0;
     this.ikPunch = null; this.hitReaction = null; this.pendingResolve = false; this.events = [];
@@ -174,6 +204,11 @@ export class Fighter {
     const isLow = type === 'kick' && this.grounded && this.state === 'block';
     const t = isAerial && type === 'kick' ? 'aerialKick' : isLow ? 'lowkick' : type;
     const timing = ATTACK[t];
+    if (t === 'super') {
+      this.meter = 0;
+      this.invincibleUntil = this.timeSec + timing.startup; // armour: can't be stuffed
+      this.pushEvent({ type: 'super', name: this.superMove.name, x: this.x, y: GROUND_Y - this.y - 50 });
+    }
     this.state = 'attack';
     this.attackType = t;
     this.attackPhase = 'startup';
@@ -190,15 +225,15 @@ export class Fighter {
 
     // Pose class is state + a frame deadline; render() applies it (and restarts the CSS
     // animation when atkClassSeq changes). No timers in the simulation.
-    this.atkClass = t === 'rush' ? 'attack-heavy' : t === 'aerialKick' ? 'attack-kick aerial' : t === 'lowkick' ? 'attack-lowkick' : `attack-${t}`;
+    this.atkClass = t === 'rush' || t === 'super' ? 'attack-heavy' : t === 'throw' ? 'attack-punch' : t === 'aerialKick' ? 'attack-kick aerial' : t === 'lowkick' ? 'attack-lowkick' : `attack-${t}`;
     this.atkClassUntilF = this.frame + framesFor(timing.startup + timing.active) + ATK_CLASS_PAD_FRAMES;
     this.atkClassSeq++;
 
-    if (t === 'punch' || t === 'rush') this.ikPunch = { start: this.timeSec, dur: (timing.startup + timing.active) * 1.6 };
+    if (t === 'punch' || t === 'rush' || t === 'super') this.ikPunch = { start: this.timeSec, dur: (timing.startup + timing.active) * 1.6 };
 
     // Motion-blur trail on the two fastest, IK-driven strikes only. Kick/lowkick are
     // CSS-keyframe driven and slower, and already read well without one.
-    if (t === 'punch' || t === 'rush') this.pushEvent({ type: 'trail', color: this.ch.color });
+    if (t === 'punch' || t === 'rush' || t === 'super') this.pushEvent({ type: 'trail', color: this.ch.color });
   }
 
   // Called by main.js after BOTH fighters' update() has run for the frame — see the
@@ -212,24 +247,35 @@ export class Fighter {
   resolveAttack(opp) {
     const t = this.attackType;
     const timing = ATTACK[t];
+    const range = t === 'super' ? this.superMove.range : timing.range;
     const dist = Math.abs(this.x - opp.x);
     const facingOK = (this.x < opp.x && this.facing === 1) || (this.x > opp.x && this.facing === -1);
-    if (dist > timing.range || !facingOK) { this.attackOutcome = 'whiff'; this.pushEvent({ type: 'whoosh' }); return; }
+    if (dist > range || !facingOK) { this.attackOutcome = 'whiff'; this.pushEvent({ type: 'whoosh' }); return; }
     if (this.timeSec < opp.invincibleUntil) { this.attackOutcome = 'whiff'; return; }
     if (opp.state === 'ko') { this.attackOutcome = 'whiff'; return; } // round already decided
-    if (opp.state === 'knockdown') { this.attackOutcome = 'whiff'; return; } // no hitting a downed fighter
+    // No hitting a downed fighter, except one the crowd just shoved back into the fight.
+    const juggle = opp.state === 'knockdown' && opp.kdPhase === 'air' && opp.juggleable;
+    if (opp.state === 'knockdown' && !juggle) { this.attackOutcome = 'whiff'; return; }
+    // Throws only catch a standing, grounded opponent (blocking or not).
+    if (t === 'throw' && (!opp.grounded || opp.y > 4 || opp.state === 'knockdown' || opp.state === 'flip' ||
+        opp.state === 'wallsplat' || opp.state === 'hitstun')) { this.attackOutcome = 'whiff'; this.pushEvent({ type: 'whoosh' }); return; }
+    if (juggle) opp.juggleable = false;
+    // True combo: the victim was still reeling (never got back to neutral) when hit.
+    const reeling = opp.state === 'hitstun' || opp.state === 'wallsplat' || juggle;
 
     this.comboCount = (this.timeSec - this.lastHitTime < COMBO_WINDOW) ? this.comboCount + 1 : 1;
     this.lastHitTime = this.timeSec;
 
-    let dmg = timing.dmg * (this.ch.stats.dmgAll || 1);
+    let dmg = (t === 'super' ? this.superMove.dmg : timing.dmg) * (this.ch.stats.dmgAll || 1);
     if (t === 'punch') dmg *= (this.ch.stats.punchDmg || 1);
     if (t === 'kick' || t === 'aerialKick') dmg *= (this.ch.stats.kickDmg || 1);
     dmg += Math.min(this.comboCount - 1, 5) * 1.6;
 
-    if ((opp.state === 'block' || opp.state === 'aerialGuard') && t !== 'rush') {
+    const guarding = opp.state === 'block' || opp.state === 'aerialGuard';
+    if (guarding && t !== 'rush' && t !== 'super' && t !== 'throw') {
       this.attackOutcome = 'block';
       dmg *= 0.22;
+      this.gainMeter(METER_GAIN_BLOCK * 0.7); opp.gainMeter(METER_GAIN_BLOCK);
       opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 });
       opp.hitReaction = { tier: 'block', start: this.timeSec };
       const kb = timing.kb * 0.4;
@@ -238,7 +284,11 @@ export class Fighter {
     } else {
       // Rush partially pierces guard (reduced damage, still counts as a hit) instead
       // of being fully blockable or fully unblockable.
-      if (t === 'rush' && (opp.state === 'block' || opp.state === 'aerialGuard')) { dmg *= 0.4; opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 }); }
+      if ((t === 'rush' || t === 'super') && guarding) { dmg *= t === 'super' ? 0.5 : 0.4; opp.pushEvent({ type: 'block', x: opp.x, y: GROUND_Y - opp.y - 40 }); }
+      if (t === 'throw') opp.x = this.x + this.facing * 30; // pulled in for the toss
+      this.chain = reeling ? this.chain + 1 : 1;
+      this.chainDmg = (reeling ? this.chainDmg : 0) + Math.min(dmg, opp.health);
+      if (t !== 'super') { this.gainMeter(dmg * METER_GAIN_DEAL); opp.gainMeter(dmg * METER_GAIN_TAKE); }
       this.attackOutcome = 'hit';
       const dirX = opp.x >= this.x ? 1 : -1;
       const w = opp.weight;
@@ -256,7 +306,8 @@ export class Fighter {
       } else {
         opp.vx += dirX * timing.kb / w;
         opp.vy += (t === 'kick' || t === 'aerialKick' ? 140 : 60) / w;
-        opp.hitstunUntil = this.timeSec + (t === 'rush' ? 0.42 : t === 'punch' ? 0.22 : 0.34);
+        // Long enough that punch > punch > kick links into a true combo (Batch 3).
+        opp.hitstunUntil = this.timeSec + (t === 'rush' ? 0.42 : t === 'punch' ? 0.30 : 0.40);
         opp.state = 'hitstun';
         opp.wallStuck = false; // a hit knocks a splatted fighter off the wall
       }
@@ -265,12 +316,12 @@ export class Fighter {
       // just-queued bufferedAttack) used to survive across the hit and could fire an
       // unintended attack/Rush the instant hitstun cleared. Getting hit now clears both.
       opp.comboBuffer.length = 0;
-      opp.bufferedAttack = null;
+      opp.bufferedAttack = null; opp.rushAfter = false;
       opp.hitflashUntilF = this.frame + HITFLASH_FRAMES;
       opp.health = Math.max(0, opp.health - dmg);
       this.hits++;
       this.pushEvent({
-        type: 'hit', tier: t, combo: this.comboCount,
+        type: 'hit', tier: t, combo: this.comboCount, chain: this.chain, chainDmg: this.chainDmg,
         x: opp.x, y: GROUND_Y - opp.y - 45, dirX: (opp.x >= this.x ? 1 : -1), color: this.ch.color
       });
       // KO is decided here, at the moment of the lethal hit. It used to be detected at the
@@ -317,6 +368,7 @@ export class Fighter {
         if (this.bufferedAttack) {
           const next = this.bufferedAttack;
           this.startAttack(next, true);
+          if (this.rushAfter) { this.bufferedAttack = 'rush'; this.rushAfter = false; }
         } else {
           this.state = this.grounded ? 'idle' : 'jump';
           this.attackType = null; this.attackPhase = null;
@@ -355,7 +407,7 @@ export class Fighter {
   // Landing from a launch (or sliding off a wall): roll if a direction is held, else lie down.
   enterDown(techDir) {
     this.state = 'knockdown';
-    this.wallStuck = false;
+    this.wallStuck = false; this.juggleable = false;
     if (techDir) {
       this.kdPhase = 'roll'; this.rollDir = techDir;
       this.kdUntilF = this.frame + TECH_ROLL_FRAMES;
@@ -456,6 +508,12 @@ export class Fighter {
     // case of mashing punch and kick on the same frame, where the punch branch below
     // has already flipped state to 'attack' by the time the kick branch runs) was
     // silently dropped instead of queued, making rapid mashing feel unresponsive.
+    // Super: full meter, from neutral or guard.
+    if (inp.superEdge && this.superReady && this.grounded && (this.canAct() || this.state === 'block')) {
+      this.startAttack('super', false);
+    }
+    // Throw: GUARD + PUNCH on the ground.
+    if (inp.punchEdge && this.state === 'block' && this.grounded) { this.startAttack('throw', false); inp = { ...inp, punchEdge: false }; }
     if (inp.punchEdge && this.state !== 'block') {
       if (this.canAct()) this.startAttack('punch', false);
       else if (this.state === 'attack' && !this.bufferedAttack) this.bufferedAttack = 'punch';
@@ -472,7 +530,9 @@ export class Fighter {
       const last3 = this.comboBuffer.slice(-3).map(e => e.n).join('');
       if (last3 === 'ppk' && this.state === 'attack') {
         this.comboBuffer.length = 0;
-        this.bufferedAttack = 'rush';
+        // Mashed fast, the 2nd punch may still be queued: keep it, then do the Rush.
+        if (this.bufferedAttack === 'punch') this.rushAfter = true;
+        else this.bufferedAttack = 'rush';
       }
     }
 
@@ -494,6 +554,8 @@ export class Fighter {
       // ballistic flight: keep the launch velocity (no air control or drag)
     } else if (this.state === 'wallsplat') {
       this.vx = 0;
+    } else if (this.state === 'attack' && this.attackType === 'super' && this.attackPhase !== 'recovery') {
+      this.vx = this.facing * this.superMove.lunge; // the super lunges forward
     } else if (this.state === 'flip') {
       const p = Math.min(1, (now - this._flipStart) / (this.flipType === 'front' ? FLIP_TIME : BACKFLIP_TIME));
       const dir = this.flipType === 'front' ? this.facing : -this.facing;
@@ -509,9 +571,18 @@ export class Fighter {
       const side = this.x <= lo ? -1 : 1;
       const intoWall = this.vx * side;
       this.x = side < 0 ? lo : hi;
-      const flying = (this.state === 'knockdown' && this.kdPhase === 'air') || this.state === 'hitstun';
-      if (flying && !this.splatUsed && intoWall >= WALL_SPLAT_SPEED) this.startWallSplat(side);
-      this.vx = 0;
+      const launched = this.state === 'knockdown' && this.kdPhase === 'air';
+      const flying = launched || this.state === 'hitstun';
+      if (launched && !this.bounceUsed && intoWall >= CROWD_BOUNCE_SPEED) {
+        // The crowd catches the fighter and shoves them back into the fight.
+        this.bounceUsed = true; this.juggleable = true;
+        this.vx = -side * CROWD_BOUNCE_VX / this.weight;
+        this.vy = CROWD_BOUNCE_VY / Math.sqrt(this.weight);
+        this.pushEvent({ type: 'crowdbounce', x: this.x, y: GROUND_Y - this.y - 45, side });
+      } else {
+        if (flying && !this.splatUsed && intoWall >= WALL_SPLAT_SPEED) this.startWallSplat(side);
+        this.vx = 0;
+      }
     }
 
     // ---- Physics: vertical (gravity) ----
@@ -544,6 +615,7 @@ export class Fighter {
     if (this.grounded && (this.state === 'idle' || this.state === 'walk')) {
       this.state = Math.abs(this.vx) > 12 ? 'walk' : 'idle';
       this.splatUsed = false; // back to neutral: the next combo may splat again
+      this.bounceUsed = false; this.juggleable = false;
     }
   }
 

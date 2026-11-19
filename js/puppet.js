@@ -1,8 +1,8 @@
 // js/puppet.js — how a fighter LOOKS and MOVES on screen (render-only).
 //
-// The fighter is drawn like the app icon: smooth, glowing neon outlines with hollow,
-// rounded limbs that bend in curves (no joint dots, no straight sticks). Each display
-// frame the puppet:
+// The fighter is a classic black stickman: solid round-capped ink strokes that bend in
+// smooth curves (no joint dots, no glow), a solid round head, and the player's colour
+// only on the headband and fists (blue for P1, red for P2). Each display frame the puppet:
 //   1. builds a target pose from the fighter's simulation state (idle, walk, attack
 //      phase and progress, hitstun, knockdown, ...). Attacks are hand-keyed animations
 //      with anticipation, a fast eased strike, a hold and a follow-through, timed to the
@@ -23,6 +23,8 @@ const GROUND = 96;            // foot sole y in the 60x100 viewBox
 const PELVIS = { x: 30, y: 57 };
 const L = { spine: 27, thigh: 20, shin: 20.5, upper: 15, fore: 14.5, foot: 6.5 };
 const DARK = '#0d0b14';
+// Ink colours come from CSS (--ink / --inkBack on .rig) so effects like the hit flash
+// can recolour the whole body without touching the SVG.
 
 // ---------- small math helpers ----------
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -126,8 +128,34 @@ const ATTACKS = {
     [1, 'base', 'inOut']
   ]
 };
+// Throw: both hands reach and grab, then the body leans back and swings the opponent
+// up and over.
+ATTACKS.throw = [
+  [0, 'base'],
+  [S * 0.8, { rx: 4, ry: 6, sp: 18, hd: 4, sF: 82, eF: 18, sB: 76, eB: 24, pF: [16], pB: [-12] }, 'snap'],
+  [A, { rx: 3, ry: 7, sp: 16, hd: 4, sF: 80, eF: 22, sB: 74, eB: 28, pF: [16], pB: [-12] }, 'lin'],
+  [0.74, { rx: -5, ry: 3, sp: -24, hd: -12, sF: 172, eF: 8, sB: 160, eB: 14, pF: [10], pB: [-17] }, 'back'],
+  [1, 'base', 'inOut']
+];
+// Super punch: a huge wind-up, then the whole body lunges behind a straight arm.
+ATTACKS.superPunch = [
+  [0, 'base'],
+  [S * 0.85, { rx: -8, ry: 9, sp: -20, hd: -6, sF: -20, eF: 150, sB: 75, eB: 90, pF: [8], pB: [-16] }, 'inOut'],
+  [S + 0.06, { rx: 16, ry: 7, sp: 32, hd: 6, sF: 98, eF: 0, sB: -40, eB: 20, pF: [30], pB: [-18] }, 'snap'],
+  [A + 0.12, { rx: 15, ry: 7, sp: 30, hd: 6, sF: 95, eF: 4, sB: -35, eB: 25, pF: [30], pB: [-18] }, 'lin'],
+  [1, 'base', 'inOut']
+];
+// Super kick: a high roundhouse with the body thrown back and both arms flung out.
+ATTACKS.superKick = [
+  [0, 'base'],
+  [S * 0.85, { rx: -4, ry: 2, sp: -12, hd: 0, sF: 80, eF: 60, sB: -40, eB: 60, hF: 110, kF: 140, fF: 50, pB: [-4] }, 'inOut'],
+  [S + 0.05, { rx: 3, ry: 2, sp: -38, hd: 14, sF: 70, eF: 30, sB: -80, eB: 20, hF: 128, kF: 0, fF: 200, pB: [-6] }, 'snap'],
+  [A + 0.1, { rx: 3, ry: 2, sp: -36, hd: 14, sF: 72, eF: 32, sB: -78, eB: 22, hF: 124, kF: 6, fF: 196, pB: [-6] }, 'lin'],
+  [0.8, { rx: 0, ry: 2, sp: -10, hd: 2, sF: 62, eF: 90, sB: 0, eB: 90, hF: 82, kF: 118, fF: 70, pB: [-7] }, 'inOut'],
+  [1, 'base', 'inOut']
+];
 // Which end effector leaves a motion smear for each attack.
-const SMEAR = { punch: 'handF', rush: 'handF', kick: 'footF', lowkick: 'footF', aerialKick: 'footF' };
+const SMEAR = { punch: 'handF', rush: 'handF', kick: 'footF', lowkick: 'footF', aerialKick: 'footF', superPunch: 'handF', superKick: 'footF' };
 
 // ---------- Static poses ----------
 function stancePose(ch, t, seed) {
@@ -154,7 +182,9 @@ const STATIC = {
   rise: { rx: 2, ry: 16, sp: 26, hd: -4, sF: 30, eF: 60, sB: 20, eB: 70, pF: [14], pB: [-10] },
   ko: { rx: 0, ry: 0, sp: -4, hd: 28, sF: 160, eF: 40, sB: 120, eB: 60, hF: 14, kF: 30, hB: -4, kB: 45 },
   splat: { rx: 0, ry: 0, sp: -4, hd: -20, sF: 150, eF: 15, sB: -150, eB: -15, hF: 28, kF: 12, hB: -24, kB: 14 },
-  hit: { rx: -5, ry: 4, sp: -24, hd: -30, sF: 25, eF: 50, sB: -35, eB: 40, pF: [14], pB: [-14] }
+  hit: { rx: -5, ry: 4, sp: -24, hd: -30, sF: 25, eF: 50, sB: -35, eB: 40, pF: [14], pB: [-14] },
+  // Winner after the round: lead fist punched straight up, other hand on the hip.
+  victory: { rx: 0, ry: 1, sp: -2, hd: -12, sF: 178, eF: 4, sB: -40, eB: -95, pF: [9], pB: [-11] }
 };
 
 // ---------- Geometry + drawing ----------
@@ -187,68 +217,52 @@ function limbPath([A, J, B]) {
   return `M${f1(A[0])},${f1(A[1])}Q${f1(cx)},${f1(cy)} ${f1(B[0])},${f1(B[1])}`;
 }
 function footPath(ankle, toe) { return `M${f1(ankle[0])},${f1(ankle[1])}L${f1(toe[0])},${f1(toe[1])}`; }
-// Tapered torso: wide shoulders to a narrower waist and hips, all rounded curves.
-function torsoPath(g, pose) {
-  const { P, C, W } = g;
-  const ax = C[0] - P[0], ay = C[1] - P[1], len = Math.hypot(ax, ay) || 1;
-  const nx = -ay / len, ny = ax / len; // perpendicular
-  const tw = pose.torsoTopW * 0.55, ww = pose.waistW * 0.55, pw = pose.pelvisW * 0.55;
-  const pt = (o, w) => `${f1(o[0] + nx * w)},${f1(o[1] + ny * w)}`;
-  const top = [C[0] - ax / len * 1.5, C[1] - ay / len * 1.5];
-  return `M${pt(top, tw)}Q${pt(W, ww * 1.15)} ${pt(P, pw)}Q${f1(P[0] - ax / len * 4)},${f1(P[1] - ay / len * 4)} ${pt(P, -pw)}` +
-    `Q${pt(W, -ww * 1.15)} ${pt(top, -tw)}Q${f1(top[0] - ax / len * -3)},${f1(top[1] - ay / len * -3)} ${pt(top, tw)}Z`;
-}
-
+// Every fighter wears the player-colour headband (with two tails flying behind);
+// a few characters add a small ink extra on top.
 function accessory(ch, g) {
   const [hx, hy] = g.H, r = ch.pose.headR + 1, rot = g.ha;
   const t = `transform="rotate(${f1(rot)} ${f1(hx)} ${f1(hy)})"`;
-  switch (ch.accessory) {
-    case 'headband': return `<g ${t}><path d="M${f1(hx - r)},${f1(hy - 3)}L${f1(hx + r)},${f1(hy - 3)}" stroke="${ch.accent}" stroke-width="3" stroke-linecap="round"/><path d="M${f1(hx - r)},${f1(hy - 3)}q-6,1 -9,6M${f1(hx - r)},${f1(hy - 2)}q-5,4 -6,9" stroke="${ch.accent}" stroke-width="1.8" fill="none" stroke-linecap="round"/></g>`;
-    case 'topknot': return `<g ${t}><circle cx="${f1(hx)}" cy="${f1(hy - r - 2.5)}" r="3.2" fill="${DARK}" stroke="currentColor" stroke-width="1.8"/></g>`;
-    case 'antenna': return `<g ${t}><path d="M${f1(hx)},${f1(hy - r)}l0,-6" stroke="currentColor" stroke-width="1.6"/><circle cx="${f1(hx)}" cy="${f1(hy - r - 7)}" r="2" fill="${ch.accent}"/></g>`;
-    default: return '';
-  }
+  const by = hy - r * 0.32;
+  let extra = '';
+  if (ch.accessory === 'topknot') extra = `<circle class="inkFill" cx="${f1(hx - 1)}" cy="${f1(hy - r - 2)}" r="3.4"/>`;
+  if (ch.accessory === 'antenna') extra = `<path class="ink" d="M${f1(hx)},${f1(hy - r)}l0,-6" stroke-width="1.8"/><circle cx="${f1(hx)}" cy="${f1(hy - r - 7)}" r="2.1" fill="currentColor"/>`;
+  return `<g ${t}>${extra}<path d="M${f1(hx - r + 0.6)},${f1(by + 0.6)}L${f1(hx + r - 0.4)},${f1(by - 0.6)}" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>` +
+    `<path class="bandTails" d="M${f1(hx - r + 1)},${f1(by)}q-5,0.5 -10,6M${f1(hx - r + 1)},${f1(by + 0.5)}q-4,4 -6,10" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></g>`;
 }
 
-function faceMarkup(ch, g) {
-  const [hx, hy] = g.H, robot = ch.accessory === 'antenna';
-  const t = `transform="rotate(${f1(g.ha)} ${f1(hx)} ${f1(hy)})"`;
-  const eye = robot ? `<rect x="${f1(hx + 1)}" y="${f1(hy - 3)}" width="6" height="2.4" rx="1" fill="${ch.accent}"/>`
-    : `<path d="M${f1(hx + 2)},${f1(hy - 2.2)}l3.4,-0.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="${f1(hx + 3.6)}" cy="${f1(hy - 0.4)}" r="1.15" fill="#fff"/>`;
-  return `<g class="face" ${t}>${eye}
-    <path class="mouthNeutral" d="M${f1(hx + 1.5)},${f1(hy + 3.6)}q2.5,0.8 4.6,-0.4" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/>
-    <ellipse class="mouthOpen" cx="${f1(hx + 3.6)}" cy="${f1(hy + 3.8)}" rx="2.2" ry="1.9" fill="#fff" opacity="0"/></g>`;
-}
+// Stroke thickness (viewBox units). Sumo is thicker, Ninja slimmer, via limbScale.
+function widths(ch) { const s = ch.pose.limbScale || 1; return { arm: 4.6 * s, leg: 5.2 * s, torso: 5.6 * s }; }
 
-// Limb thickness: hollow neon tube = thick colour stroke with a dark core.
-function widths(ch) { const s = ch.pose.limbScale || 1; return { arm: 5.6 * s, leg: 6.4 * s, core: 0.42 }; }
-
+// Fists in the player colour (bigger for the boxer's gloves).
 function handMarkup(ch, end, cls) {
-  const r = ch.accessory === 'gloves' ? 4.6 : 3.2;
-  const fill = ch.accessory === 'gloves' ? '#d8322a' : DARK;
-  const band = ch.accessory === 'wristbands' ? `<circle cx="${f1(end[0])}" cy="${f1(end[1])}" r="${f1(r + 1.6)}" fill="none" stroke="${ch.accent}" stroke-width="1.6" opacity=".9"/>` : '';
-  return `<g class="${cls}">${band}<circle cx="${f1(end[0])}" cy="${f1(end[1])}" r="${r}" fill="${fill}" stroke="currentColor" stroke-width="1.8"/></g>`;
+  const r = ch.accessory === 'gloves' ? 4.4 : 3.3;
+  const band = ch.accessory === 'wristbands' ? `<circle class="inkFill" cx="${f1(end[0])}" cy="${f1(end[1])}" r="${f1(r + 1.3)}"/>` : '';
+  return `<g class="${cls}">${band}<circle cx="${f1(end[0])}" cy="${f1(end[1])}" r="${r}" fill="currentColor"/></g>`;
+}
+// Spine as one straight ink stroke from the hips to the neck.
+function spinePath(g) {
+  const { P, C } = g;
+  return `M${f1(P[0])},${f1(P[1])}L${f1(C[0])},${f1(C[1])}`;
 }
 
 // Full SVG markup for one pose (used for the select screen and as the initial DOM).
 function markup(ch, g) {
-  const w = widths(ch), back = 'opacity=".62"';
-  const tube = (cls, d, width, extra = '') =>
-    `<path class="${cls}" d="${d}" fill="none" stroke="currentColor" stroke-width="${f1(width)}" stroke-linecap="round" ${extra}/>` +
-    `<path class="${cls}C" d="${d}" fill="none" stroke="${DARK}" stroke-width="${f1(width * w.core)}" stroke-linecap="round" ${extra}/>`;
+  const w = widths(ch);
+  const line = (cls, d, width, ink = 'ink') =>
+    `<path class="${cls} ${ink}" d="${d}" stroke-width="${f1(width)}"/>`;
   const robe = ch.accessory === 'robe' ? ' robe' : '';
   return `<svg class="rig${robe}" viewBox="0 0 60 100" overflow="visible">
     <path class="smear" d="" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" opacity="0"/>
-    <g class="back" ${back}>
-      ${tube('legB', limbPath(g.legB), w.leg)}${tube('footB', footPath(g.legB[2], g.toeB), w.leg * 0.85)}
-      ${tube('armB', limbPath(g.armB), w.arm)}${handMarkup(ch, g.armB[2], 'handB')}
+    <g class="back">
+      ${line('legB', limbPath(g.legB), w.leg, 'inkBack')}${line('footB', footPath(g.legB[2], g.toeB), w.leg * 0.85, 'inkBack')}
+      ${line('armB', limbPath(g.armB), w.arm, 'inkBack')}${handMarkup(ch, g.armB[2], 'handB')}
     </g>
-    <path class="torso" d="${torsoPath(g, ch.pose)}" fill="${DARK}" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
-    <path class="sash" d="" stroke="${ch.accent}" stroke-width="2.4" stroke-linecap="round" opacity="${ch.accessory === 'topknot' || ch.accessory === 'robe' ? 0.9 : 0}"/>
-    ${tube('legF', limbPath(g.legF), w.leg)}${tube('footF', footPath(g.legF[2], g.toeF), w.leg * 0.85)}
-    <g class="headG"><circle class="head" cx="${f1(g.H[0])}" cy="${f1(g.H[1])}" r="${ch.pose.headR + 1}" fill="${DARK}" stroke="currentColor" stroke-width="2.2"/>
-    ${faceMarkup(ch, g)}${accessory(ch, g)}</g>
-    ${tube('armF', limbPath(g.armF), w.arm)}${handMarkup(ch, g.armF[2], 'handF')}
+    ${line('torso', spinePath(g), w.torso)}
+    <path class="sash" d="" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" opacity="${ch.accessory === 'topknot' || ch.accessory === 'robe' ? 1 : 0}"/>
+    ${line('legF', limbPath(g.legF), w.leg)}${line('footF', footPath(g.legF[2], g.toeF), w.leg * 0.85)}
+    <g class="headG"><circle class="head inkFill" cx="${f1(g.H[0])}" cy="${f1(g.H[1])}" r="${ch.pose.headR + 1}"/>
+    ${accessory(ch, g)}</g>
+    ${line('armF', limbPath(g.armF), w.arm)}${handMarkup(ch, g.armF[2], 'handF')}
   </svg>`;
 }
 
@@ -294,14 +308,20 @@ export class Puppet {
     const st = f.state;
     let rate = 14; // joint easing speed (1/s)
 
-    if (st === 'attack' && f.attackType && f.attackDurations && ATTACKS[f.attackType]) {
+    if (f.victory && f.grounded && st !== 'ko' && st !== 'knockdown') {
+      this._vt = (this._vt || 0) + dt; // the sim clock has stopped, so animate on render time
+      const p = { ...STATIC.victory, ry: STATIC.victory.ry - Math.abs(Math.sin(this._vt * 6)) * 2.5 };
+      return { pose: resolve(p), rate: 12 };
+    }
+    const atkKey = f.attackType === 'super' ? (f.superMove.style === 'kick' ? 'superKick' : 'superPunch') : f.attackType;
+    if (st === 'attack' && atkKey && f.attackDurations && ATTACKS[atkKey]) {
       const d = f.attackDurations, el = t - f.attackPhaseStart;
       let u;
       if (f.attackPhase === 'startup') u = S * clamp(el / d.startup, 0, 1);
       else if (f.attackPhase === 'active') u = S + (A - S) * clamp(el / d.active, 0, 1);
       else { const rd = d.recovery[f.attackOutcome] || d.recovery.whiff; u = A + (1 - A) * clamp(el / rd, 0, 1); }
       const airBase = f.attackType === 'aerialKick' ? resolve(STATIC.jumpDown) : base;
-      return { pose: sampleKeys(ATTACKS[f.attackType], u, airBase), rate: 40, smear: SMEAR[f.attackType], u };
+      return { pose: sampleKeys(ATTACKS[atkKey], u, airBase), rate: 40, smear: SMEAR[atkKey], u };
     }
     if (st === 'block' || st === 'aerialGuard') return { pose: resolve(STATIC.block), rate: 24 };
     if (st === 'hitstun') return { pose: resolve(STATIC.hit), rate: 30 };
@@ -360,11 +380,11 @@ export class Puppet {
     setD(e.legF, lF); setD(e.legFC, lF); setD(e.legB, lB); setD(e.legBC, lB);
     setD(e.armF, aF); setD(e.armFC, aF); setD(e.armB, aB); setD(e.armBC, aB);
     setD(e.footF, fF); setD(e.footFC, fF); setD(e.footB, fB); setD(e.footBC, fB);
-    setD(e.torso, torsoPath(g, ch.pose));
+    setD(e.torso, spinePath(g));
     if (ch.accessory === 'topknot' || ch.accessory === 'robe') {
       const { P, C } = g; // belt / sash across the hips
       const ax = C[0] - P[0], ay = C[1] - P[1], len = Math.hypot(ax, ay) || 1, nx = -ay / len, ny = ax / len;
-      const w = ch.pose.pelvisW * 0.55, bx = P[0] + ax / len * 4, by = P[1] + ay / len * 4;
+      const w = ch.pose.pelvisW * 0.32, bx = P[0] + ax / len * 4, by = P[1] + ay / len * 4;
       setD(e.sash, `M${f1(bx + nx * w)},${f1(by + ny * w)}L${f1(bx - nx * w)},${f1(by - ny * w)}`);
     }
     // Head group and hands are moved as a whole (cheaper than rebuilding the face).

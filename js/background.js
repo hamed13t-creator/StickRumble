@@ -63,11 +63,13 @@ function crowdRow(rand, w, y, spacing, sc, opts = {}) {
   let out = '', x = rand() * spacing * 0.5;
   while (x < w + spacing) {
     out += person(rand, x + (rand() * 6 - 3), y + (rand() * 4 - 2) * sc, sc * (0.9 + rand() * 0.2),
-      { ...opts, animate: rand() < (opts.solo ?? 0.15) });
+      { ...opts, animate: rand() < (opts.solo ?? 0.15) * 0.5 }); // Batch 3: half as many animated people (less repainting on phones)
     x += spacing * (0.55 + rand() * 0.7);
   }
-  const dur = (2 + (y % 5) * 0.2).toFixed(2);
-  return `<g class="rowJump"><g><animateTransform attributeName="transform" type="translate" values="0,0;${f1(1.5 * sc)},${f1(-1.2 * sc)};0,0" dur="${dur}s" repeatCount="indefinite"/>${out}</g></g>`;
+  // Batch 3: the whole-row sway animation was removed. It repainted the full width of
+  // every crowd row on every frame, the biggest single cost on phones. Rows still jump
+  // on big moments (CSS .rowJump), and individual fans still pump their fists.
+  return `<g class="rowJump"><g>${out}</g></g>`;
 }
 
 function cheerGlow(w, yTop, yBottom) {
@@ -83,7 +85,7 @@ function skyLayer(w, h, rand) {
   for (let i = 0; i < w / 22; i++) {
     const x = rand() * w, y = rand() * h * 0.4;
     out += i % 4 === 0
-      ? `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(0.5 + rand())}" fill="#fff"><animate attributeName="opacity" values=".2;.9;.2" dur="${(2 + rand() * 3).toFixed(2)}s" repeatCount="indefinite"/></circle>`
+      ? `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(0.5 + rand())}" fill="#fff" opacity=".8"/>` // static: twinkling cost a repaint per star per frame
       : `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(0.4 + rand() * 0.8)}" fill="#fff" opacity=".45"/>`;
   }
   return out;
@@ -167,7 +169,7 @@ function streetCrowdLayer(w, h, rand) {
   const drums = [];
   for (let x = 160; x < w; x += 380 + rand() * 260) drums.push(x);
   // fire glow first (behind people)
-  for (const x of drums) out += `<circle cx="${f1(x)}" cy="${base - 40}" r="90" fill="url(#fireG)"><animate attributeName="opacity" values=".8;1;.7;.95;.8" dur="1.3s" repeatCount="indefinite"/></circle>`;
+  for (const x of drums) out += `<circle cx="${f1(x)}" cy="${base - 40}" r="90" fill="url(#fireG)" opacity=".9"/>`; // static glow (a 180 px animated circle repainted every frame)
   out += crowdRow(rand, w, base - 26, 24, 1.15, { solo: 0.18, rim: '#ff9a52' });
   out += crowdRow(rand, w, base - 12, 26, 1.3, { solo: 0.2, rim: '#ff9a52' });
   for (const x of drums) {
@@ -186,8 +188,8 @@ function streetCrowdLayer(w, h, rand) {
 // ---- 6a. Foreground crowd in front of the fight (big, dark, backlit) ----
 function foregroundLayer(w, h, rand) {
   let out = '';
-  out += crowdRow(rand, w, h + 40, 52, 2.5, { dark: true, rim: '#ffb07a', solo: 0.3 });
-  out += crowdRow(rand, w, h + 72, 66, 3.1, { dark: true, rim: '#ff8a5c', solo: 0.2, arms: 0 });
+  out += crowdRow(rand, w, h + 40, 52, 2.5, { dark: true, rim: '#ffb07a', solo: 0.24 });
+  out += crowdRow(rand, w, h + 72, 66, 3.1, { dark: true, rim: '#ff8a5c', solo: 0, arms: 0 });
   return out;
 }
 
@@ -196,7 +198,7 @@ function sideCluster(rand, side) {
   let out = '';
   for (let i = 0; i < 4; i++) {
     const x = side < 0 ? 4 + i * 18 + rand() * 6 : 96 - i * 18 - rand() * 6;
-    out += person(rand, x * 0.8, 430 + i * 12 + rand() * 6, 2.2 - i * 0.2, { dark: true, rim: '#ff9a62', arms: rand() < 0.6 ? 1 : 0, animate: rand() < 0.6 });
+    out += person(rand, x * 0.8, 430 + i * 12 + rand() * 6, 2.2 - i * 0.2, { dark: true, rim: '#ff9a62', arms: rand() < 0.6 ? 1 : 0, animate: rand() < 0.35 });
   }
   return out;
 }

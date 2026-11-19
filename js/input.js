@@ -8,15 +8,15 @@
 // codebase (fighter.js, ai.js) expects — no analog walk/run speed. Adding that would be
 // a fighter.js physics change (scaling targetVx by deflection), not an input.js one.
  
-export const input = { left: false, right: false, jump: false, punch: false, kick: false, block: false };
+export const input = { left: false, right: false, jump: false, punch: false, kick: false, block: false, super: false };
  
 // Block can now be held from three independent sources (keyboard, the on-screen GUARD
 // button, and the joystick pulled down for the new crouch/guard command) — tracked
 // separately and OR'd into input.block so releasing one source doesn't clear a hold
 // another source still has active.
-const blockSources = { key: false, button: false, joyDown: false };
+const blockSources = { key: false, button: false, joyDown: false, throw: false };
 function updateBlock() {
-  input.block = blockSources.key || blockSources.button || blockSources.joyDown;
+  input.block = blockSources.key || blockSources.button || blockSources.joyDown || blockSources.throw;
 }
  
 const DASH_WINDOW = 320;
@@ -46,10 +46,10 @@ export const flipEvents = []; // { kind: 'front' } pushed on a qualifying Up-Up;
  
 // ---- Input buffering for punch/kick/jump ----
 const INPUT_BUFFER_MS = 320; // matched to KO hit-stop freeze duration
-const pressStamp = { punch: 0, kick: 0, jump: 0 };
+const pressStamp = { punch: 0, kick: 0, jump: 0, super: 0 };
  
 function stampPress(key) {
-  if ((key === 'punch' || key === 'kick' || key === 'jump') && !input[key]) {
+  if ((key === 'punch' || key === 'kick' || key === 'jump' || key === 'super') && !input[key]) {
     pressStamp[key] = performance.now();
   }
 }
@@ -173,6 +173,12 @@ function initJoystick(root) {
 let inputRotation = 0;
 export function setInputRotation(deg) { inputRotation = deg; }
 
+// THROW = GUARD + PUNCH in one press.
+function pressThrow(down) {
+  blockSources.throw = down; updateBlock();
+  if (down) { stampPress('punch'); input.punch = true; } else input.punch = false;
+}
+
 // Impact haptics: main.js scales the vibration length by hit tier.
 export function haptic(ms) { vibrate(Math.max(1, Math.round(ms))); }
 
@@ -184,6 +190,8 @@ export function initInput(root) {
     'ArrowUp': 'jump', 'w': 'jump', 'W': 'jump', ' ': 'jump',
     'j': 'punch', 'J': 'punch', 'z': 'punch', 'Z': 'punch',
     'k': 'kick', 'K': 'kick', 'x': 'kick', 'X': 'kick',
+    'o': 'throw', 'O': 'throw',
+    'u': 'super', 'U': 'super', 'i': 'super', 'I': 'super', 'c': 'super', 'C': 'super',
     'l': 'block', 'L': 'block', 'ArrowDown': 'block', 's': 'block', 'S': 'block'
   };
   const wasDown = { left: false, right: false };
@@ -196,6 +204,7 @@ export function initInput(root) {
     if ((key === 'left' || key === 'right') && !wasDown[key]) noteDirectionTap(key === 'left' ? -1 : 1);
     if (key === 'left' || key === 'right') wasDown[key] = true;
     if (key === 'block') { blockSources.key = true; updateBlock(); return; }
+    if (key === 'throw') { pressThrow(true); return; }
     stampPress(key);
     input[key] = true;
   });
@@ -204,6 +213,7 @@ export function initInput(root) {
     const key = downMap[e.key];
     if (!key) return;
     if (key === 'block') { blockSources.key = false; updateBlock(); return; }
+    if (key === 'throw') { pressThrow(false); return; }
     input[key] = false;
     if (key === 'left' || key === 'right') wasDown[key] = false;
   });
@@ -212,10 +222,10 @@ export function initInput(root) {
   // stuck "down" forever since no keyup ever fires — main.js auto-pauses on
   // visibilitychange, but this clears the raw state too so nothing is stuck once resumed.
   window.addEventListener('blur', () => {
-    input.left = input.right = input.jump = input.punch = input.kick = input.block = false;
+    input.left = input.right = input.jump = input.punch = input.kick = input.block = input.super = false;
     wasDown.left = wasDown.right = false;
     joyDir = null; joyVert = null;
-    blockSources.key = blockSources.button = blockSources.joyDown = false;
+    blockSources.key = blockSources.button = blockSources.joyDown = blockSources.throw = false;
   });
  
   // ---- Touch/mouse: virtual joystick ----
@@ -228,12 +238,14 @@ export function initInput(root) {
       e.preventDefault();
       try { btn.setPointerCapture(e.pointerId); } catch (_) {}
       if (key === 'block') { blockSources.button = true; updateBlock(); }
+      else if (key === 'throw') pressThrow(true);
       else { stampPress(key); input[key] = true; }
-      vibrate(key === 'punch' || key === 'kick' ? 12 : 8);
+      vibrate(key === 'punch' || key === 'kick' || key === 'super' ? 12 : 8);
     };
     const off = e => {
       e.preventDefault();
       if (key === 'block') { blockSources.button = false; updateBlock(); }
+      else if (key === 'throw') pressThrow(false);
       else input[key] = false;
     };
     btn.addEventListener('pointerdown', on);
@@ -250,6 +262,7 @@ export function edgesFrom(prev) {
     punch: consumeBuffered('punch', now),
     kick: consumeBuffered('kick', now),
     jump: consumeBuffered('jump', now),
+    super: consumeBuffered('super', now),
     block: input.block && !prev.block
   };
   Object.assign(prev, input);
@@ -268,6 +281,6 @@ export function consumeFlip() {
 export function clearInputQueues() {
   dashEvents.length = 0;
   flipEvents.length = 0;
-  pressStamp.punch = pressStamp.kick = pressStamp.jump = 0;
+  pressStamp.punch = pressStamp.kick = pressStamp.jump = pressStamp.super = 0;
 }
  

@@ -165,3 +165,20 @@ export function spawnDust(x, groundY, power = 1) {
     el.style.setProperty('--sz', (10 + Math.random() * 14 * power).toFixed(1) + 'px');
   }
 }
+
+// Crowd shove: dark arms reach out of the crowd at the arena edge and push the fighter
+// back into the fight. side: -1 = left edge, +1 = right edge.
+export function spawnCrowdShove(x, y, side) {
+  for (let i = 0; i < 4; i++) {
+    const el = spawnEl('shoveArm');
+    if (!el) break;
+    const len = 60 + Math.random() * 30;
+    // Arms start just outside the fighter (inside the crowd) and point back to centre.
+    const sx = x + side * (len + 6), sy = y - 30 + i * 18 + (Math.random() * 8 - 4);
+    el.style.left = sx.toFixed(1) + 'px';
+    el.style.top = sy.toFixed(1) + 'px';
+    el.style.width = len.toFixed(0) + 'px';
+    el.style.setProperty('--r', ((side > 0 ? 180 : 0) + (Math.random() * 24 - 12)).toFixed(0) + 'deg');
+    el.style.animationDelay = (i * 0.03).toFixed(2) + 's';
+  }
+}
